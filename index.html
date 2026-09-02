@@ -87,7 +87,7 @@ label.f .mm{color:var(--mute);font-size:9px}
 <body>
 <div class="update" id="update"><span id="updateT">A NEW BUILD OF CASEMAKER IS AVAILABLE</span><button class="btn" id="updateGo">RELOAD</button><button class="x" id="updateX" title="Dismiss">✕</button></div>
 <header>
-  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-01.15</div></div>
+  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-01.16</div></div>
   <input class="job" id="job" value="NEW CASE">
   <select id="preset"><option value="">SAMPLE PRODUCTS</option></select>
   <div class="spacer"></div>
@@ -183,7 +183,7 @@ const DEFAULTS = {
             topGap: mm(3) },         // under the top panel when hung from it
   shelf:  { frontGap: mm(2), sideClear: mm(0.5), pinDia: 0.25, pinPitch: mm(32),
             pinFirst: 6.437, pinFront: 2, pinBack: 2 },
-  door:   { reveal: mm(2), insetClear: mm(2), cupK: mm(28), thickness: null }
+  door:   { reveal: mm(2), insetClear: mm(2), cupK: mm(28), thickness: null, bottomZ: null }   // bottomZ: door bottom from the floor, if the product fixes it
 };
 
 /* ---------- 3  MODEL ---------- */
@@ -315,20 +315,23 @@ function drawerStack(M, space, bay) {
   const faceZ1 = space.z1 >= ceil - 0.01 ? r4(M.H - O.topGap) : space.z1; // reaches the top: cover it, less the gap
   const heights = kinds.map((k, i) => faceH(k, i));
   const total = r4(heights.reduce((a, v) => a + v, 0) + O.faceGap * (kinds.length - 1));
-  const room  = r4(faceZ1 - faceZ0);
-  const scale = total > room ? room / total : 1;                         // never overflow the front
+  const scale = 1;                                                       // faces are exactly the heights given
   const align = bay.align || 'bottom';
   let z = align === 'top' ? r4(faceZ1 - total * scale) : faceZ0;
 
   kinds.forEach((kind, i) => {
     const fh = r4(heights[i] * scale);
     const roomUp = r4(space.z1 - Math.max(z + 0.25, space.z0 + 0.25) - 0.1);
-    const boxH = Math.max(1, Math.min(kind === 'FILE' ? O.fileBoxH : O.boxBoxH, r4(fh - 0.25), roomUp));
+    const boxWant = (bay.boxHeights || [])[i] != null ? bay.boxHeights[i] : (kind === 'FILE' ? O.fileBoxH : O.boxBoxH);
+    const boxH = Math.max(1, Math.min(boxWant, r4(fh - 0.25), roomUp));
     const slide = kind === 'FILE' ? O.fileSlide : O.boxSlide;
     const boxDepth = Math.min(slide, r4(inside - 0.25));
     const setback = r4(Math.max(0, inside - boxDepth));                     // box sits back from the front
-    const faceW = r4(opening + T - 2 * O.sideReveal);                       // laps the parts either side
-    const faceX = r4(space.x0 - T / 2 + O.sideReveal);
+    /* the face laps whatever is beside it: the full side panel at the case edge, half a divider inside */
+    const touchL = Math.abs(space.x0 - T) < 0.01, touchR = Math.abs(space.x1 - (M.W - T)) < 0.01;
+    const faceX  = touchL ? O.sideReveal : r4(space.x0 - T / 2 + O.faceGap / 2);
+    const faceX1 = touchR ? r4(M.W - O.sideReveal) : r4(space.x1 + T / 2 - O.faceGap / 2);
+    const faceW  = r4(faceX1 - faceX);
     const boxX  = r4(space.x0 + O.slideClear);
     const boxZ  = r4(Math.max(z + 0.25, space.z0 + 0.25));                 // the box stays inside the opening
 
@@ -396,17 +399,18 @@ function parts(M) {
     P('TOP', M.top === 'over' ? r4(M.W + 2 * te) : r4(M.W - 2 * T), r4(M.D + tf), T,
       { min: [M.top === 'over' ? -te : T, -tf, r4(M.H - T)], max: [M.top === 'over' ? r4(M.W + te) : r4(M.W - T), M.D, M.H] });
   }
+  const backY = M.back === 'none' ? M.D : r4(M.D - M.backT);                                 // where the back panel starts
   if (M.bottom !== 'none')
-    P('BOTTOM', r4(M.W - 2 * T), M.D, T, { min: [T, 0, M.kick], max: [r4(M.W - T), M.D, r4(M.kick + T)] });
+    P('BOTTOM', r4(M.W - 2 * T), backY, T, { min: [T, 0, M.kick], max: [r4(M.W - T), backY, r4(M.kick + T)] });   // butts into the back
   if (M.kick > 0)
     P('KICK BOARD', r4(M.W - 2 * T), M.kick, T,                                              // between the sides, set back from the front
       { min: [T, M.kickInset, 0], max: [r4(M.W - T), r4(M.kickInset + T), M.kick] });
   if (M.back !== 'none') {
-    const y0 = M.backEdge === 'flush' ? r4(M.D - M.backT) : r4(M.D - M.backT - mm(1));
-    P('BACK PANEL', r4(M.W - 2 * T), r4(M.H - M.kick - T), M.backT,
-      { min: [T, y0, r4(M.kick + T)], max: [r4(M.W - T), r4(y0 + M.backT), r4(M.H - T)] });
+    const y0 = M.backEdge === 'flush' ? backY : r4(backY - mm(1));
+    const zTop = M.top === 'none' ? M.H : r4(M.H - T);
+    P('BACK PANEL', r4(M.W - 2 * T), zTop, M.backT,                                          // floor to the underside of the top
+      { min: [T, y0, 0], max: [r4(M.W - T), r4(y0 + M.backT), zTop] });
   }
-  const backY = M.back === 'none' ? M.D : r4(M.D - M.backT);
   M.shelves.forEach((s, i) => P('FIXED SHELF ' + (i + 1), r4(s.x1 - s.x0), backY, T,
     { min: [s.x0, 0, s.z], max: [s.x1, backY, r4(s.z + T)] }, { partId: s.id }));
   M.dividers.forEach((d, i) => P('DIVIDER ' + (i + 1), r4(d.z1 - d.z0), backY, T,
@@ -424,12 +428,18 @@ function parts(M) {
     }
     if (b.content === 'drawers') drawerStack(M, c, b).forEach(p => out.push(p));
     if (b.content === 'door' || b.content === 'doors2') {
-      const O2 = M.opt.door, n = b.content === 'doors2' ? 2 : 1;
-      const w = r4((c.w + T - 2 * O2.reveal - (n - 1) * O2.reveal) / n);
+      /* doors are applied to the FRONT like drawer faces: an opening that reaches a side or the top is
+         covered to the case edge less the reveal; the bottom edge can be set per product */
+      const O2 = M.opt.door, n = b.content === 'doors2' ? 2 : 1, rv = O2.reveal;
+      const touchL = Math.abs(c.x0 - T) < 0.01, touchR = Math.abs(c.x1 - (M.W - T)) < 0.01;
+      const x0 = touchL ? rv : r4(c.x0 - T / 2 + rv / 2), x1 = touchR ? r4(M.W - rv) : r4(c.x1 + T / 2 - rv / 2);
+      const ceilZ = M.top === 'none' ? M.H : r4(M.H - T), floorZ = M.bottom === 'none' ? M.kick : r4(M.kick + T);
+      const z1 = c.z1 >= ceilZ - 0.01 ? M.H : r4(c.z1 + T / 2 - rv / 2);            // runs to the top of the case, as v1 does
+      const z0 = c.z0 <= floorZ + 0.01 ? (O2.bottomZ != null ? O2.bottomZ : r4(M.kick + rv)) : r4(c.z0 - T / 2 + rv / 2);
+      const w = r4((x1 - x0 - (n - 1) * rv) / n);
       for (let i = 0; i < n; i++)
-        P(n === 2 ? 'DOOR ' + (i ? 'R' : 'L') : 'DOOR', w, r4(c.h - 2 * O2.reveal), T,
-          { min: [r4(c.x0 - T / 2 + O2.reveal + i * (w + O2.reveal)), -T, r4(c.z0 + O2.reveal)],
-            max: [r4(c.x0 - T / 2 + O2.reveal + i * (w + O2.reveal) + w), 0, r4(c.z1 - O2.reveal)] });
+        P(n === 2 ? 'DOOR ' + (i ? 'R' : 'L') : 'DOOR', w, r4(z1 - z0), T,
+          { min: [r4(x0 + i * (w + rv)), -T, z0], max: [r4(x0 + i * (w + rv) + w), 0, z1] });
     }
   });
   return out;
@@ -440,18 +450,22 @@ const PRESETS = {
   '5CLBK48':  { label: 'BOOKCASE 48"',        W: 34.65,   H: 47.2441, D: 13.9764, T: 1.03,   backT: 1.03,
                 kick: 2.7559, shelvesAdj: 2 },
   '5CLSC34':  { label: 'STORAGE CABINET 34"', W: 34.6457, H: 28.4646, D: 22.5591, T: 0.9843, backT: 0.7087,
-                kick: 2.7559, shelvesAdj: 1, doors: 2 },
+                kick: 2.7559, shelvesAdj: 1, doors: 2, doorReveal: mm(3), doorBottom: mm(85) },   // doors run from 85 mm to the top
   '5CLBBF22': { label: 'PEDESTAL BOX/BOX/FILE', W: 15.5118, H: 27.9528, D: 21.8504, T: 0.7087, backT: 0.6299,
-                kick: 2.7559, drawers: { box: 2, file: 1 }, heights: [mm(318), mm(157), mm(157)] },
+                kick: 2.7559, drawers: { box: 2, file: 1 }, heights: [mm(318), mm(157), mm(157)],
+                boxHeights: [mm(245), mm(90), mm(90)], boxSlide: mm(400), fileSlide: mm(510) },
   '5CLFF22':  { label: 'PEDESTAL FILE/FILE',  W: 15.5118, H: 27.9528, D: 21.8504, T: 0.7087, backT: 0.6299,
-                kick: 2.7559, drawers: { box: 0, file: 2 }, heights: [mm(318), mm(318)] },
+                kick: 2.7559, drawers: { box: 0, file: 2 }, heights: [mm(318), mm(318)],
+                boxHeights: [mm(245), mm(245)], fileSlide: mm(510) },
   '5CLH72':   { label: 'HUTCH 72"',           W: 34.6457, H: 36.0236, D: 14.9606, T: 0.9843, backT: 0.6299,
                 kick: 0, bottom: 'none', shelvesAdj: 2 },
   '5CLLF34':  { label: 'LATERAL FILE 34"',    W: 34.6457, H: 27.9528, D: 22.5591, T: 0.9843, backT: 0.7087,
-                kick: 2.7559, drawers: { box: 0, file: 2 }, heights: [mm(318), mm(318)] },
+                kick: 2.7559, drawers: { box: 0, file: 2 }, heights: [mm(318), mm(318)],
+                boxHeights: [mm(245), mm(245)], fileSlide: mm(538), sideReveal: mm(2) },
   '5CLBFM':   { label: 'MOBILE BOX/FILE',     W: 15.5118, H: 22.8346, D: 21.8504, T: 0.7087, backT: 0.6299,
                 kick: 2.1654, drawers: { box: 1, file: 1 }, heights: [mm(318), mm(184)], align: 'top',
-                topFront: 'flush', topEnds: mm(3) }                             // top runs out flush with the drawer faces
+                boxHeights: [mm(245), mm(120)], boxSlide: mm(510), fileSlide: mm(510), sideReveal: -mm(1),   // v1: faces 1 mm proud of the sides
+                topFront: 'flush', topEnds: 0 }                                 // top runs out flush with the drawer faces, no end overhang
 };
 
 function loadPreset(name) {
@@ -464,7 +478,13 @@ function loadPreset(name) {
   const b = bayOf(M, sp.key);
   if (p.shelvesAdj) b.shelves = p.shelvesAdj;
   if (p.doors) b.content = p.doors === 2 ? 'doors2' : 'door';
-  if (p.drawers) { b.content = 'drawers'; b.drawers = { ...p.drawers }; b.heights = p.heights || []; if (p.align) b.align = p.align; }
+  if (p.drawers) { b.content = 'drawers'; b.drawers = { ...p.drawers }; b.heights = p.heights || []; if (p.align) b.align = p.align;
+    if (p.boxHeights) b.boxHeights = p.boxHeights; }
+  if (p.boxSlide) M.opt.drawer.boxSlide = p.boxSlide;                          // the product's own slides and reveals
+  if (p.fileSlide) M.opt.drawer.fileSlide = p.fileSlide;
+  if (p.sideReveal != null) M.opt.drawer.sideReveal = p.sideReveal;
+  if (p.doorReveal != null) M.opt.door.reveal = p.doorReveal;
+  if (p.doorBottom != null) M.opt.door.bottomZ = p.doorBottom;
   return M;
 }
 
@@ -893,7 +913,7 @@ const EXP = { nest: { sheet: '48,96', gap: 0.5, margin: 0.25, grain: 'match' },
               three: { format: 'stl', units: 'in', faces: true } };
 const download = (name, text, type) => { const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: type || 'text/plain' })); a.download = name; a.click(); URL.revokeObjectURL(a.href); };
-const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-01.15'.slice(0, 10);
+const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-01.16'.slice(0, 10);
 
 function openFlyout(which) {
   const F = $('flyout'), body = $('fyBody'), foot = $('fyFoot');
@@ -1052,9 +1072,9 @@ $('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
 $('newBtn').onclick = () => { M = newCase(); HIST.past = []; HIST.future = []; HIST.last = null; UI.sc = null; UI.sel = { kind: 'case' }; $('preset').value = ''; $('job').value = M.job; render(); };
 $('job').onchange = () => { M.job = $('job').value; };
 $('saveBtn').onclick = () => {
-  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-01.15', saved: new Date().toISOString(), model: M };
+  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-01.16', saved: new Date().toISOString(), model: M };
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(doc)], { type: 'application/json' }));
-  a.download = (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-01.15'.slice(0, 10) + '.casemaker2'; a.click(); URL.revokeObjectURL(a.href); };
+  a.download = (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-01.16'.slice(0, 10) + '.casemaker2'; a.click(); URL.revokeObjectURL(a.href); };
 $('loadBtn').onclick = () => $('loadFile').click();
 $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
   f.text().then(t => { try { const d = JSON.parse(t); if (d.format !== 'CASEMAKER2') throw new Error('not a CASEMAKER 2 file');
@@ -1065,7 +1085,7 @@ $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
    Served over http: the page re-reads itself every minute and compares build stamps.
    Opened from a file: the browser blocks reading files, so tabs tell each other instead -
    opening a newer build in any tab tells every older tab on this machine. */
-const BUILD = '2026-09-01.15';
+const BUILD = '2026-09-01.16';
 const newer = (a, b) => { if (!a || !b) return false; const [da, na] = a.split('.'), [db, nb] = b.split('.');
   return da > db || (da === db && (+na || 0) > (+nb || 0)); };
 function showUpdate(build) { $('updateT').textContent = 'A NEW BUILD OF CASEMAKER IS AVAILABLE · ' + build + ' (YOU ARE ON ' + BUILD + ')'; $('update').classList.add('show'); }
