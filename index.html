@@ -89,7 +89,7 @@ label.f .mm{color:var(--mute);font-size:9px}
 <body>
 <div class="update" id="update"><span id="updateT">A NEW BUILD OF CASEMAKER IS AVAILABLE</span><button class="btn" id="updateGo">RELOAD</button><button class="x" id="updateX" title="Dismiss">✕</button></div>
 <header>
-  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.12 <span id="saveChip" style="color:var(--amber);cursor:pointer;margin-left:8px"></span></div></div>
+  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.17 <span id="saveChip" style="color:var(--amber);cursor:pointer;margin-left:8px"></span></div></div>
   <input class="job" id="job" value="NEW CASE">
   <select id="preset"><option value="">SAMPLE PRODUCTS</option></select>
   <span style="width:14px"></span>
@@ -118,7 +118,8 @@ label.f .mm{color:var(--mute);font-size:9px}
       <button class="btn" id="tShelf">ADD SHELF</button>
       <button class="btn" id="tDivider">ADD DIVIDER</button>
       <button class="btn danger" id="tDelete">DELETE</button>
-      <span class="hint" id="toolHint">CLICK A PART OR A SPACE · DRAG THE TOP OR THE LEFT SIDE TO RESIZE THE CASE · SHIFT FOR FREE MOVEMENT</span>
+      <button class="btn" id="doorsEye" style="display:none">HIDE DOORS</button>
+<span class="hint" id="toolHint">CLICK A PART OR A SPACE · DRAG THE TOP OR THE LEFT SIDE TO RESIZE THE CASE · SHIFT FOR FREE MOVEMENT</span>
     </div>
     <div id="plan"></div>
     <div id="partsView"></div>
@@ -313,6 +314,24 @@ const nextId = pre => pre + '-' + (++_id);
 const resetIds = () => { _id = 0; };
 
 /* ---------- 2  DEFAULTS ---------- */
+/* Closet rod holder (Closet_Rod_Holder_PETG.stl), measured off the model: the mounting
+   flange is a stadium 69.0 x 37.0 mm - two R18.5 arcs whose centres sit 32 mm apart -
+   sunk 6 mm into the panel. A screw passes through each arc centre. The C cradle stands
+   over the first centre, so THE ROD AXIS IS THAT ARC CENTRE and the flange tail runs the
+   other way. Two holders face each other across the compartment and the rod hangs between. */
+const ROD = {
+  rodD: mm(25.4), belowTop: mm(50),                        // 1" rod, 50 mm under what is above it
+  styles: {
+    A: { label: 'STADIUM FLANGE \u00b7 6 MM POCKET',       // Closet_Rod_Holder_PETG.stl, measured
+         shape: 'stadium', R: mm(18.5), c2c: mm(32), pocketZ: mm(6),
+         screwD: mm(5), screwZ: mm(12), tail: 'back', out: mm(16.6) },
+    B: { label: 'ROUND CUP \u00b7 4 MM POCKET',            // rod_hook_B.stl, measured: \u00d839 flange,
+         shape: 'circle', R: mm(19.5), pocketZ: mm(4),     // U cup opens up, rod axis = the centre,
+         screwD: mm(3.5), screwZ: mm(12),                  // 2 countersunk screws 13 mm apart,
+         pairDX: mm(6.5), pairDZ: mm(5.19), out: mm(19.6) }// 5.2 mm above the axis
+  }
+}
+
 const DEFAULTS = {
   case:   { W: 36, H: 48, D: 12, T: 1.03, backT: 1.03, kick: 2.75, kickInset: mm(1.5),
             top: 'over', bottom: 'between', back: 'full', backEdge: 'inset',   // the back sits 1 mm in from the rear edge unless set flush
@@ -607,17 +626,36 @@ function parts(M) {
       const want = c.z0 + (c.z1 - c.z0) * i / (b.shelves + 1);
       const k = Math.round((want - O.pinDia / 2 - O.pinFirst) / O.pinPitch);   // nearest pin row
       const z = r4(Math.min(Math.max(O.pinFirst + k * O.pinPitch + O.pinDia / 2, c.z0 + 1), c.z1 - T - 1));
-      P('ADJ SHELF', r4(c.w - 2 * O.sideClear), r4(backY - O.frontGap), T,
-        { min: [r4(c.x0 + O.sideClear), O.frontGap, z], max: [r4(c.x1 - O.sideClear), backY, r4(z + T)] });
+      P('ADJ SHELF', r4(c.w - 2 * O.sideClear), r4(backY - Math.max(O.frontGap, M.frontY || 0)), T,
+        { min: [r4(c.x0 + O.sideClear), Math.max(O.frontGap, M.frontY || 0), z], max: [r4(c.x1 - O.sideClear), backY, r4(z + T)] });
     }
     if (b.content === 'drawers') drawerStack(M, c, b).forEach(p => out.push(p));
-    if (b.content === 'door' || b.content === 'doors2') emitDoors(c, b, caseDoors);
+    if (b.content === 'door' || b.content === 'doors2') emitDoors(c, b, false);   // its band is excluded from the case doors, so it keeps its own style
   });
-  /* doors over the whole case - hinged on the case sides, spanning every compartment */
+  /* doors over the whole case - hinged on the case sides. A compartment that already has
+     its own door keeps it: the case doors cover only the regions without one. At a shelf
+     between regions, inset doors reach over the shelf's front band; overlay doors half-lap
+     the shelf from its centreline like any overlay door. */
   if (caseDoors) {
-    const floorZ = M.bottom === 'none' ? M.kick : r4(M.kick + (M.caseBottomT || T));
-    const ceilZ = M.top === 'none' ? M.H : r4(M.H - T);
-    emitDoors({ x0: T, x1: r4(M.W - T), z0: floorZ, z1: ceilZ, key: 'CASE' }, CB, false);
+    const Cs = spaces(M);
+    const floorZ2 = M.bottom === 'none' ? M.kick : r4(M.kick + (M.caseBottomT || T));
+    const ceilZ2 = M.top === 'none' ? M.H : r4(M.H - T);
+    const zb = [...new Set([floorZ2, ceilZ2, ...Cs.flatMap(q => [r4(q.z0), r4(q.z1)])])].sort((x, y) => x - y);
+    const kind = mid => { const hit = Cs.filter(q => q.z0 <= mid && q.z1 >= mid);
+      if (!hit.length) return 'shelf';
+      return hit.some(q => { const bb = bayOf(M, q.key); return bb.content === 'door' || bb.content === 'doors2'; }) ? 'doored' : 'open'; };
+    let lo = null, hi = null;
+    const flush = () => { if (lo == null) return;
+      if (hi - lo > 2) emitDoors({ x0: T, x1: r4(M.W - T), z0: lo, z1: hi, key: 'CASE' }, CB, false,
+        { loInt: lo > floorZ2 + 0.01, hiInt: hi < ceilZ2 - 0.01 });
+      lo = hi = null; };
+    for (let i = 0; i < zb.length - 1; i++) {
+      const k2 = kind((zb[i] + zb[i + 1]) / 2);
+      if (k2 === 'open') { if (lo == null) lo = zb[i]; hi = zb[i + 1]; }
+      else if (k2 === 'doored') flush();
+      /* a bare shelf band neither starts nor ends a region - it sits inside one */
+    }
+    flush();
   }
   applyJoinery(M, out);
   return out;
@@ -627,7 +665,8 @@ function parts(M) {
      half a divider covered where two doors share it (9.5 mm crank).
      Each edge gap can be overridden; blank means the global default. A door inside a
      case that itself has doors is forced inset, behind the case-door plane.          */
-  function emitDoors(c, b, behindCaseDoors) {
+  function emitDoors(c, b, behindCaseDoors, edge) {
+    edge = edge || {};
     const O2 = M.opt.door, n = b.content === 'doors2' ? 2 : 1;
     let style = (b.doorStyle && b.doorStyle !== 'auto') ? b.doorStyle : (O2.style || 'inset');
     if (behindCaseDoors) style = 'inset';
@@ -637,7 +676,9 @@ function parts(M) {
     const dT = r4(O2.thickness || T);
     let x0, x1, z0, z1, yMin, yMax;
     if (style === 'inset') {
-      x0 = r4(c.x0 + gL); x1 = r4(c.x1 - gR); z0 = r4(c.z0 + gB); z1 = r4(c.z1 - gT);
+      x0 = r4(c.x0 + gL); x1 = r4(c.x1 - gR);
+      z0 = r4(c.z0 - (edge.loInt ? T : 0) + gB);                                // an internal edge: reach over the shelf's front band
+      z1 = r4(c.z1 + (edge.hiInt ? T : 0) - gT);
       yMin = behindCaseDoors ? M.frontY : 0; yMax = r4(yMin + dT);            // flush with the front it belongs to
     } else {
       const touchL = Math.abs(c.x0 - T) < 0.01, touchR = Math.abs(c.x1 - (M.W - T)) < 0.01;
@@ -782,6 +823,55 @@ function applyJoinery(M, out) {
       (bay2.hingeType && bay2.hingeType !== 'auto') ? ovr[bay2.hingeType] :
       (car && car.name.startsWith('DIVIDER')) ? ovr.half : ovr.full;            // two doors share a divider: each covers half of it
     if (car) hingePlates(car, door, ys, H); });
+  /* closet rods: a pocket in each panel that bounds the compartment, facing each other.
+     Style A: stadium flange standing VERTICAL - rod on the lower arc centre, the tail and
+     its screw straight above, so the cradle opens up and the rod drops in.
+     Style B: round cup, rod axis at the centre, screws above it. */
+  spaces(M).forEach(cc => { const b = bayOf(M, cc.key); if (!b.rod) return;
+    const ST = ROD.styles[b.rodStyle === 'B' ? 'B' : 'A'];
+    const r = ST.R, pz = ST.pocketZ, up = ST.shape === 'stadium' ? ST.c2c : 0;   // headroom above the rod axis
+    const bkIn2 = M.backEdge === 'flush' ? 0 : mm(1);
+    const yLo = M.frontY || 0, yHi = M.back === 'none' ? M.D : r4(M.D - M.backT - bkIn2);
+    let zc = r4(cc.z1 - (b.rodBelow != null ? b.rodBelow : ROD.belowTop));
+    zc = r4(Math.min(Math.max(zc, cc.z0 + r + 0.1), cc.z1 - up - r - 0.1));      // flange stays inside the space
+    let yc = b.rodY != null ? r4(yLo + b.rodY) : r4((yLo + yHi) / 2);
+    yc = r4(Math.min(Math.max(yc, yLo + r), yHi - r));
+    const zt = r4(zc + up);                                                      // tail arc centre, above
+    [[cc.x0, 'max'], [cc.x1, 'min']].forEach(([x, side]) => {
+      const p = out.find(q => q.box && q.frame && Math.abs(q.box[side][0] - x) < 0.02 &&
+        q.box.min[2] <= zc + 0.01 && q.box.max[2] >= zc - 0.01 && (q.name.endsWith('SIDE') || q.name.startsWith('DIVIDER')));
+      if (!p) return;
+      const D = (wy, wz) => toDrawing(p, [x, wy, wz]);
+      const sd = b.rodScrewD || ST.screwD, sz = r4(pz + (b.rodScrewZ || ST.screwZ));
+      if (ST.shape === 'stadium') {
+        const [sx, sy] = D(yc, zc), [tx, ty] = D(yc, zt);                        // a screw through each arc centre
+        addHole(p, 'SCREW', r4(sx), r4(sy), sd, sz); addHole(p, 'SCREW', r4(tx), r4(ty), sd, sz);
+      } else {
+        const [ax, ay] = D(r4(yc - ST.pairDX), r4(zc + ST.pairDZ)), [bx2, by2] = D(r4(yc + ST.pairDX), r4(zc + ST.pairDZ));
+        addHole(p, 'SCREW', r4(ax), r4(ay), sd, sz); addHole(p, 'SCREW', r4(bx2), r4(by2), sd, sz);
+      }
+      const L = 'ROD_POCKET', pts = [], N = 16;
+      if (ST.shape === 'stadium') {
+        for (let i = 0; i <= N; i++) { const th = Math.PI + Math.PI * i / N;     // under the rod centre: left, bottom, right
+          pts.push(D(r4(yc + r * Math.cos(th)), r4(zc + r * Math.sin(th)))); }
+        for (let i = 0; i <= N; i++) { const th = Math.PI * i / N;               // over the tail centre: right, top, left
+          pts.push(D(r4(yc + r * Math.cos(th)), r4(zt + r * Math.sin(th)))); }   // the joins are the straight sides
+      } else {
+        for (let i = 0; i < 2 * N; i++) { const a2 = 2 * Math.PI * i / (2 * N);
+          pts.push(D(r4(yc + r * Math.cos(a2)), r4(zc + r * Math.sin(a2)))); }
+      }
+      pts.push(pts[0]);
+      for (let i = 1; i < pts.length; i++) addLine(p, L, r4(pts[i - 1][0]), r4(pts[i - 1][1]), r4(pts[i][0]), r4(pts[i][1]));
+      const [rx, ry] = D(yc, zc); p.rodAxis = [r4(rx), r4(ry), b.rodD || ROD.rodD];   // the tube's end, for the drawing
+      p.pocketZ = pz; });
+    const rd = b.rodD || ROD.rodD;
+    out.push({ id: nextId('HW'), name: 'CLOSET ROD', hardware: true, qty: 1, w: r4(cc.x1 - cc.x0 + 2 * pz), h: rd, t: rd,
+      box: { min: [r4(cc.x0 - pz), r4(yc - rd / 2), r4(zc - rd / 2)], max: [r4(cc.x1 + pz), r4(yc + rd / 2), r4(zc + rd / 2)] } });
+    [[cc.x0, 1], [cc.x1, -1]].forEach(([x, s2]) => out.push({ id: nextId('HW'), name: 'CLOSET ROD HOLDER ' + (b.rodStyle === 'B' ? 'B' : 'A'), hardware: true, qty: 1,
+      w: r4(2 * r), h: r4(2 * r), t: ST.out,
+      box: { min: [s2 > 0 ? x : r4(x - ST.out), r4(yc - r), r4(zc - r)],
+             max: [s2 > 0 ? r4(x + ST.out) : x, r4(yc + r), r4(zt + r)] } }));
+  });
   /* grommets: cut into whatever forms the opening's ceiling (v1 rule) */
   spaces(M).forEach(cc => { const b = bayOf(M, cc.key); if (!b.grommet) return;
     const ceil = out.find(q => q.box && q.box.min && Math.abs(q.box.min[2] - cc.z1) < 0.02 &&
@@ -1696,7 +1786,12 @@ function drawPlan() {
     if (p.role || p.partId || p.name === 'ADJ SHELF' || p.name.startsWith('DOOR') || p.name === 'BACK PANEL') return;
     const b = p.box; part('part', p.name, b.min[0], b.min[2], b.max[0] - b.min[0], b.max[2] - b.min[2]);
   });
+  const anyDoors = PS.some(q => q.name.startsWith('DOOR'));
+  const eye = $('doorsEye'); if (eye) { eye.style.display = anyDoors ? '' : 'none'; eye.textContent = UI.hideDoors ? 'SHOW DOORS' : 'HIDE DOORS';
+    eye.onclick = () => { UI.hideDoors = !UI.hideDoors; render(); }; }
   function drawDoorViz(d) {
+    if (UI.hideDoors) return;
+    P.push('<g pointer-events="none">');
       const x0 = d.box.min[0], x1 = d.box.max[0], z0 = d.box.min[2], z1 = d.box.max[2];
       const cups = (d.holes || []).filter(h => h.type === 'HINGE');
       let hRight = d.hingeEdge === 'R';
@@ -1709,6 +1804,7 @@ function drawPlan() {
       P.push('<line x1="' + X(hX) + '" y1="' + Y(z0) + '" x2="' + X(hX) + '" y2="' + Y(z1) + '" stroke="var(--blue)" stroke-width="3.5"/>');
       cups.forEach(cp => { const wz = toWorld(d, cp.x, cp.y, 'shown')[2];
         P.push('<circle cx="' + X(hX) + '" cy="' + Y(wz) + '" r="4" fill="var(--panel)" stroke="var(--blue)" stroke-width="2"/>'); });
+    P.push('</g>');
     }
   C.forEach(c => {
     const b = bayOf(M, c.key), s = on('bay', c.key);
@@ -1720,6 +1816,11 @@ function drawPlan() {
     adjShelfZ(M, c, b.shelves).forEach(z => {
       P.push('<rect x="' + X(c.x0) + '" y="' + Y(z + T) + '" width="' + ((c.x1 - c.x0) * sc) + '" height="' + (T * sc) + '" fill="rgba(255,255,255,.10)" stroke="var(--mute)" stroke-width="1" stroke-dasharray="4 3"/>'); });
     if (b.grommet) P.push('<circle cx="' + X((c.x0 + c.x1) / 2) + '" cy="' + (Y(c.z1) - 9) + '" r="5" fill="none" stroke="var(--red)" stroke-width="1.4"/>');
+    if (b.rod) { const rz = c.z1 - (b.rodBelow != null ? b.rodBelow : ROD.belowTop), rr = Math.max(3, ((b.rodD || ROD.rodD) / 2) * sc);
+      const hot = on('rod', c.key);
+      P.push('<g class="hit" data-k="rod" data-i="' + c.key + '" style="cursor:ns-resize">' +
+        '<line x1="' + X(c.x0) + '" y1="' + Y(rz) + '" x2="' + X(c.x1) + '" y2="' + Y(rz) + '" stroke="' + (hot ? 'var(--amber)' : '#c9a227') + '" stroke-width="' + (2 * rr) + '" stroke-linecap="round" opacity=".55"/>' +
+        [c.x0, c.x1].map(x2 => '<circle cx="' + X(x2) + '" cy="' + Y(rz) + '" r="' + (rr + 2.5) + '" fill="none" stroke="' + (hot ? 'var(--amber)' : '#c9a227') + '" stroke-width="2"/>').join('') + '</g>'); }
     if (b.content === 'drawers') drawerStack(M, c, b).filter(p => p.role === 'face').forEach(f => {
       P.push('<rect x="' + X(f.box.min[0]) + '" y="' + Y(f.box.max[2]) + '" width="' + ((f.box.max[0] - f.box.min[0]) * sc) + '" height="' + ((f.box.max[2] - f.box.min[2]) * sc) +
         '" fill="rgba(245,165,36,.10)" stroke="var(--amber)" stroke-width="1.2"/>'); });
@@ -1764,7 +1865,7 @@ function drawPlan() {
     if (UI.tool === 'shelf' || UI.tool === 'divider') { addAt(at(e)); return; }
     if (!g) { if (UI.sel.kind !== 'case') { UI.sel = { kind: 'case' }; render(); } return; }   // blank: back to the case settings
     const kind = g.dataset.k, id = g.dataset.i;
-    UI.sel = { kind, id }; render(); badge(kind, id); };
+    UI.sel = kind === 'rod' ? { kind: 'bay', id } : { kind, id }; render(); badge(kind === 'rod' ? 'rod' : kind, id); };
   svg.onmousemove = e => { const g = $('ghost'); if (!g) return;
     if (UI.tool !== 'shelf' && UI.tool !== 'divider') { g.setAttribute('opacity', 0); return; }
     const p = at(e), r = nearestSpace(p);
@@ -1773,19 +1874,19 @@ function drawPlan() {
     if (UI.tool === 'shelf') { g.setAttribute('x1', X(r.x0)); g.setAttribute('x2', X(r.x1)); g.setAttribute('y1', Y(p.z)); g.setAttribute('y2', Y(p.z)); }
     else { g.setAttribute('y1', Y(r.z0)); g.setAttribute('y2', Y(r.z1)); g.setAttribute('x1', X(p.x)); g.setAttribute('x2', X(p.x)); } };
   svg.onmouseleave = () => { const g = $('ghost'); if (g) g.setAttribute('opacity', 0); hideBadge(); };
-  svg.querySelectorAll('[data-k="shelf"],[data-k="divider"]').forEach(g => {
+  svg.querySelectorAll('[data-k="shelf"],[data-k="divider"],[data-k="rod"]').forEach(g => {
     const kind = g.dataset.k, id = g.dataset.i;
     g.addEventListener('mouseenter', () => { UI.hover = { kind, id }; if (!UI.drag) badge(kind, id); });
     g.addEventListener('mouseleave', () => { UI.hover = null;
       if (!UI.drag && !(UI.sel.kind === kind && UI.sel.id === id)) UI.hideT = setTimeout(hideBadge, 350); });   // a selected part keeps its badge
     g.addEventListener('mousedown', e => { if (UI.tool !== 'select') return; e.preventDefault();
       const it = findPart(kind, id), p0 = at(e);                                 // keep the grab point: no snap to the cursor
-      UI.drag = { kind, id, moved: false, off: it ? (kind === 'shelf' ? it.z - p0.z : it.x - p0.x) : 0 };
-      UI.sel = { kind, id }; badge(kind, id); });
+      UI.drag = { kind, id, moved: false, off: it ? (kind === 'divider' ? it.x - p0.x : it.z - p0.z) : 0 };
+      UI.sel = kind === 'rod' ? { kind: 'bay', id } : { kind, id }; badge(kind, id); });
     g.addEventListener('dblclick', e => { e.preventDefault();
-      const it = findPart(kind, id), cur = kind === 'shelf' ? it.z : it.x;
-      const v = prompt((kind === 'shelf' ? 'HEIGHT FROM FLOOR' : 'X FROM LEFT') + ' (inches)', cur.toFixed(3));
-      if (v !== null && !isNaN(parseFloat(v))) { if (kind === 'shelf') it.z = r3(parseFloat(v)); else it.x = r3(parseFloat(v)); render(); } });
+      const it = findPart(kind, id), cur = kind === 'divider' ? it.x : it.z;
+      const v = prompt((kind === 'divider' ? 'X FROM LEFT' : 'HEIGHT FROM FLOOR') + ' (inches)', cur.toFixed(3));
+      if (v !== null && !isNaN(parseFloat(v))) { if (kind === 'divider') it.x = r3(parseFloat(v)); else it.z = r3(parseFloat(v)); render(); } });
   });
   $('fCase').textContent = M.W + ' × ' + M.H + ' × ' + M.D + '"';
   $('fParts').textContent = C.length + ' SPACES · ' + M.shelves.length + ' SHELVES · ' + M.dividers.length + ' DIVIDERS';
@@ -1793,7 +1894,14 @@ function drawPlan() {
   $('fSel').textContent = UI.sel.kind === 'bay' ? ('SPACE ' + (c ? c.id : '')) : UI.sel.kind === 'shelf' ? 'FIXED SHELF' :
     UI.sel.kind === 'divider' ? 'DIVIDER' : (UI.sel.id || 'CASE');
 }
-const findPart = (kind, id) => kind === 'shelf' ? M.shelves.find(s => s.id === id) : M.dividers.find(d => d.id === id);
+const findPart = (kind, id) => kind === 'shelf' ? M.shelves.find(s => s.id === id) :
+  kind === 'rod' ? rodAt(id) : M.dividers.find(d => d.id === id);
+/* the rod acts like a shelf: one z value, stored as the distance below its space's top */
+function rodAt(key) { const c = spaces(M).find(q => q.key === key); if (!c) return null;
+  const b = bayOf(M, key);
+  return { c, b, x0: c.x0, x1: c.x1,
+    get z() { return r3(c.z1 - (b.rodBelow != null ? b.rodBelow : ROD.belowTop)); },
+    set z(v) { b.rodBelow = r3(Math.min(Math.max(c.z1 - v, 1), c.z1 - c.z0 - 1)); } }; }
 function nearestSpace(p) {
   const C = spaces(M), inside = C.find(c => p.x >= c.x0 && p.x <= c.x1 && p.z >= c.z0 && p.z <= c.z1);
   if (inside) return inside;
@@ -1819,16 +1927,16 @@ $('tDivider').onclick = () => setTool(UI.tool === 'divider' ? 'select' : 'divide
 $('tDelete').onclick = () => deleteSelected();
 function deleteSelected() { if (UI.sel.kind === 'shelf' || UI.sel.kind === 'divider') removePart(UI.sel.kind, UI.sel.id); }
 function badge(kind, id) { const g = $('badge'), it = findPart(kind, id); if (!g || !it || !UI.plan) return;
-  const v = kind === 'shelf' ? it.z : it.x, inp = $('badgeI');
-  $('badgeL').textContent = kind === 'shelf' ? 'HEIGHT' : 'X';
+  const v = kind === 'divider' ? it.x : it.z, inp = $('badgeI');
+  $('badgeL').textContent = kind === 'divider' ? 'X' : kind === 'rod' ? 'ROD HEIGHT' : 'HEIGHT';
   if (document.activeElement !== inp) inp.value = v.toFixed(3);
   g.style.visibility = 'visible'; g.style.pointerEvents = 'all';
   /* anchored to the part: a shelf shows it at its right end, a divider at its top */
-  const ax = kind === 'shelf' ? Math.max(UI.plan.X(it.x0) + 4, UI.plan.X(it.x1) - 200) : UI.plan.X(it.x + M.T / 2) + 8;   // beside the part, never over it
-  const ay = kind === 'shelf' ? UI.plan.Y(it.z + M.T) - 32 : UI.plan.Y(it.z1) + 6;
+  const ax = kind === 'divider' ? UI.plan.X(it.x + M.T / 2) + 8 : Math.max(UI.plan.X(it.x0) + 4, UI.plan.X(it.x1) - 200);
+  const ay = kind === 'divider' ? UI.plan.Y(it.z1) + 6 : kind === 'rod' ? UI.plan.Y(it.z) - 34 : UI.plan.Y(it.z + M.T) - 32;
   g.setAttribute('x', ax); g.setAttribute('y', ay);
   inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') { const n = parseFloat(inp.value);
-      if (!isNaN(n)) { if (kind === 'shelf') it.z = r3(n); else it.x = r3(n); } hideBadge(); render(); }
+      if (!isNaN(n)) { if (kind === 'divider') it.x = r3(n); else it.z = r3(n); } hideBadge(); render(); }
     if (e.key === 'Escape') hideBadge(); };
   inp.onmousedown = e => e.stopPropagation();
   const bc = $('badgeC'); bc.style.display = '';
@@ -1847,6 +1955,7 @@ function sizeBadge() { const R = UI.resize, g = $('badge'), inp = $('badgeI'); i
 /* centre a shelf between what is under and over it, a divider between its neighbours */
 function centerPart(kind, id) {
   const it = findPart(kind, id); if (!it) return; const C = spaces(M), T = M.T;
+  if (kind === 'rod') { it.b.rodBelow = r3((it.c.z1 - it.c.z0) / 2); render(); badge(kind, id); return; }
   if (kind === 'shelf') {
     const below = C.find(c => Math.abs(c.z1 - it.z) < 0.02 && c.x1 > it.x0 + 0.01 && c.x0 < it.x1 - 0.01);
     const above = C.find(c => Math.abs(c.z0 - (it.z + T)) < 0.02 && c.x1 > it.x0 + 0.01 && c.x0 < it.x1 - 0.01);
@@ -1875,8 +1984,9 @@ addEventListener('mousemove', e => {
   const snap = v => e.shiftKey ? v : Math.round(v * 16) / 16;
   UI.drag.moved = true;
   const off = UI.drag.off || 0;
-  if (UI.drag.kind === 'shelf') it.z = r3(snap(Math.min(Math.max(p.z + off, M.kick + M.T + 1), M.H - 2 * M.T - 1)));
-  else it.x = r3(snap(Math.min(Math.max(p.x + off, M.T + 1), M.W - M.T - 1)));
+  if (UI.drag.kind === 'divider') it.x = r3(snap(Math.min(Math.max(p.x + off, M.T + 1), M.W - M.T - 1)));
+  else if (UI.drag.kind === 'rod') it.z = r3(snap(p.z + off));                  // the setter clamps inside its space
+  else it.z = r3(snap(Math.min(Math.max(p.z + off, M.kick + M.T + 1), M.H - 2 * M.T - 1)));
   if (!UI.raf) UI.raf = requestAnimationFrame(() => { UI.raf = null; render(); if (UI.drag) badge(UI.drag.kind, UI.drag.id); }); });
 addEventListener('mouseup', () => { if (UI.resize) { UI.resize = null; UI.lock = null; hideBadge(); render(); }
   if (UI.drag) { const d = UI.drag; UI.drag = null;
@@ -2028,7 +2138,7 @@ function inspector() {
         '<div class="row" style="margin-top:8px">' +
         SL('HINGES PER DOOR', 'hgN', b.hinges || 'auto', [['auto', 'AUTO - BY DOOR HEIGHT'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5']]) +
         '<label class="f">HINGE END DISTANCE<input id="hgE" type="number" step="0.125" value="' + (b.hingeEnd != null ? b.hingeEnd : '') + '" placeholder="' + ((M.opt.joinery || JOINERY).hinge.end) + '"></label></div>' +
-        '<div style="color:var(--mute);font-size:9.5px;margin-top:5px;line-height:1.5">AUTO: ON A DIVIDER THE DOOR SHARES IT, SO IT GETS A HALF OVERLAY HINGE; ON A CASE SIDE, FULL OVERLAY. AN INSET DOOR ALWAYS TAKES THE INSET CRANK.</div></div>' +
+        '<div style="color:var(--mute);font-size:9.5px;margin-top:5px;line-height:1.5">AUTO: HALF OVERLAY ON A DIVIDER, FULL ON A CASE SIDE. INSET DOORS USE THE INSET CRANK.</div></div>' +
         (() => { const dc = b.doorClr || {}, defMM = ((b.doorStyle === 'overlay' || (!b.doorStyle || b.doorStyle === 'auto') && (M.opt.door.style || 'inset') === 'overlay') ? M.opt.door.reveal : M.opt.door.insetClear) * MM;
           const FO = (l, id, v) => '<label class="f">' + l + '<input id="' + id + '" type="number" step="0.0197" value="' + (v == null ? '' : r3(v)) + '" placeholder="AUTO"><span class="mm">' + (v == null ? 'DEFAULT ' + defMM.toFixed(1) + ' mm' : '= ' + (v * MM).toFixed(1) + ' mm') + '</span></label>';
           return '<div class="grp"><div class="t">EDGE GAPS · BLANK = DEFAULT</div><div class="row">' +
@@ -2037,7 +2147,18 @@ function inspector() {
       seg('ADJUSTABLE SHELVES', 'segS', b.shelves, [[0, '—'], [1, '1'], [2, '2'], [3, '3'], [4, '4']]) +
       '<div class="grp"><div class="t">SPLIT THIS SPACE</div><div class="seg" id="segU">' +
         [['vert', '+ DIVIDER'], ['horiz', '+ SHELF'], ['cross', '+ CROSS']].map(o => '<button data-v="' + o[0] + '">' + o[1] + '</button>').join('') + '</div></div>' +
-      '<div class="grp"><div class="t">GROMMET · CUT IN THE CEILING OF THIS SPACE</div><div class="row">' + SL('SHAPE', 'groS', b.grommet || 'none', [['none', 'NONE'], ['round', 'ROUND'], ['rect', 'RECTANGLE']]) + '</div>' +
+      '<div class="grp"><div class="t">CLOSET ROD</div>' +
+      seg('', 'rdOn', b.rod ? 'on' : 'off', [['off', 'NONE'], ['on', 'ROD']]) +
+      (b.rod ? (() => { const ST = ROD.styles[b.rodStyle === 'B' ? 'B' : 'A'];
+        const FO = (l, id, v, ph) => '<label class="f">' + l + '<input id="' + id + '" type="number" step="0.125" value="' + (v == null ? '' : r3(v)) + '" placeholder="' + ph + '"></label>';
+        return seg('HOLDER STYLE', 'rdSt', b.rodStyle === 'B' ? 'B' : 'A', [['A', 'A \u00b7 STADIUM \u00b7 6 MM'], ['B', 'B \u00b7 ROUND CUP \u00b7 4 MM']]) +
+          '<div class="row" style="margin-top:8px">' +
+          FO('BELOW THE TOP', 'rdB', b.rodBelow, r3(ROD.belowTop)) +
+          FO('FROM THE FRONT', 'rdY', b.rodY, 'CENTRED') +
+          FO('ROD DIAMETER', 'rdD', b.rodD, r3(ROD.rodD)) + '</div>' +
+          
+          '<div style="color:var(--mute);font-size:9.5px;margin-top:5px;line-height:1.5">ONE HOLDER IN EACH FACING PANEL, POCKETED ' + (ST.pocketZ * MM).toFixed(0) + ' MM (' + (ST.shape === 'stadium' ? '69 \u00d7 37 STADIUM, TAIL UP' : '\u00d8 39 ROUND') + '). DRAG THE ROD IN THE DRAWING.</div>'; })() : '') + '</div>' +
+      '<div class="grp"><div class="t">GROMMET</div><div class="row">' + SL('SHAPE', 'groS', b.grommet || 'none', [['none', 'NONE'], ['round', 'ROUND'], ['rect', 'RECTANGLE']]) + '</div>' +
       (b.grommet ? (() => { const FO = (l, id, v, ph) => '<label class="f">' + l + '<input id="' + id + '" type="number" step="0.0625" value="' + (v == null ? '' : v) + '" placeholder="' + ph + '"></label>';
         return '<div class="row" style="margin-top:8px">' + (b.grommet === 'round' ? FO('DIAMETER', 'groD', b.grod, '2.375') :
           FO('WIDTH', 'groW', b.grow, '6') + FO('HEIGHT', 'groH', b.groh, '2') + FO('CORNER RADIUS', 'groR', b.gror, '0.5')) +
@@ -2057,6 +2178,9 @@ function inspector() {
     bind('dBox', v => b.drawers.box = Math.max(0, v | 0)); bind('dFile', v => b.drawers.file = Math.max(0, v | 0));
     bind('dAlign', v => b.align = v);
     bind('dHts', v => b.heights = String(v).split(',').map(t => parseFloat(t)).filter(n => !isNaN(n)).map(n => n / MM));
+    wire('rdOn', v => b.rod = v === 'on'); wire('rdSt', v => b.rodStyle = v); 
+    [['rdB', 'rodBelow'], ['rdY', 'rodY'], ['rdD', 'rodD']].forEach(([id, k]) => { const el = $(id); if (!el) return;
+      el.onchange = () => { b[k] = el.value.trim() === '' ? null : parseFloat(el.value); render(); }; });
     bind('groS', v => b.grommet = v === 'none' ? null : v);
     [['groD', 'grod'], ['groW', 'grow'], ['groH', 'groh'], ['groR', 'gror'], ['groX', 'grox'], ['groY', 'groy']].forEach(([id, k]) => { const el = $(id); if (!el) return;
       el.onchange = () => { b[k] = el.value.trim() === '' ? null : parseFloat(el.value); render(); }; });
@@ -2096,10 +2220,9 @@ function inspector() {
             (CB.content === 'door' ? seg('HINGE SIDE', 'cdH', CB.hinge || 'L', [['L', 'LEFT'], ['R', 'RIGHT']]) : '') +
             '<div class="row" style="margin-top:8px">' +
             SL('HINGES PER DOOR', 'cdHn', CB.hinges || 'auto', [['auto', 'AUTO - BY DOOR HEIGHT'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5']]) +
-            '<label class="f">HINGE END DISTANCE<input id="cdHe" type="number" step="0.125" value="' + (CB.hingeEnd != null ? CB.hingeEnd : '') + '" placeholder="' + ((M.opt.joinery || JOINERY).hinge.end) + '"><span class="mm">FIRST AND LAST CUP FROM THE DOOR ENDS</span></label></div>' +
-            '<div style="color:var(--mute);font-size:9.5px;margin-top:5px;line-height:1.5">THE DOORS SPAN EVERY COMPARTMENT AND HINGE ON THE CASE SIDES. AN INSET DOOR PUSHES THE SHELVES, DIVIDERS AND DRAWERS BACK SO THEY CLEAR IT; AN OVERLAY DOOR SITS OUTSIDE THE CASE.</div>' : '') + '</div>'; })() +
-    '<div class="grp"><div class="t">LAYOUT</div><div style="color:var(--mute);font-size:10px">Use <b style="color:var(--amber)">+ SHELF</b> and ' +
-    '<b style="color:var(--amber)">+ DIVIDER</b> above the drawing, or press S and D. Drag a part to move it, double-click it to type a value, Delete removes it.</div></div>';
+            '<label class="f">HINGE END DISTANCE<input id="cdHe" type="number" step="0.125" value="' + (CB.hingeEnd != null ? CB.hingeEnd : '') + '" placeholder="' + ((M.opt.joinery || JOINERY).hinge.end) + '"><span class="mm">CUP DISTANCE FROM THE DOOR ENDS</span></label></div>' +
+            '<div style="color:var(--mute);font-size:9.5px;margin-top:5px;line-height:1.5">HINGED ON THE CASE SIDES. INSET PUSHES THE INTERIOR BACK CLEAR OF THE DOORS. COMPARTMENTS WITH THEIR OWN DOOR ARE SKIPPED.</div>' : '') + '</div>'; })() +
+    '<div class="grp"><div class="t">LAYOUT</div><div style="color:var(--mute);font-size:10px"><b style="color:var(--amber)">+ SHELF</b> / <b style="color:var(--amber)">+ DIVIDER</b> or S / D. Drag to move, double-click to type, Delete removes.</div></div>';
   (() => { const CB = bayOf(M, 'CASE');
     wire('cdN', v => CB.content = v); wire('cdS', v => CB.doorStyle = v); wire('cdH', v => CB.hinge = v);
     const hn = $('cdHn'); if (hn) hn.onchange = () => { CB.hinges = hn.value; render(); };
@@ -2144,6 +2267,9 @@ function panelSVG(pt) {
   P.push('<text x="' + X(w / 2) + '" y="' + (Y(0) + 24) + '" font-size="10" fill="#7d8798" text-anchor="middle">' + (eB || '') + '  \u00b7  ' + w.toFixed(2) + '"</text>');
   if (eT) P.push('<text x="' + X(w / 2) + '" y="' + (Y(h) - 8) + '" font-size="10" fill="#7d8798" text-anchor="middle">' + eT + '</text>');
   P.push('<text x="' + (X(0) + 3) + '" y="' + (Y(0) - 4) + '" font-size="9" fill="#7d8798">0,0</text>');
+  if (pt.rodAxis) { const [rx, ry, rd] = pt.rodAxis, rr = (rd / 2) * sc;
+    P.push('<circle cx="' + X(rx) + '" cy="' + Y(ry) + '" r="' + rr + '" fill="rgba(201,162,39,.12)" stroke="#c9a227" stroke-width="1.6" stroke-dasharray="5 4"/>');
+    P.push('<text x="' + (X(rx) + rr + 4) + '" y="' + Y(ry) + '" font-size="9" fill="#c9a227">ROD \u00d8' + r3(rd) + '"</text>'); }
   /* view note */
   const face = pt.frame ? faceWord(pt, false) : '';
   P.push('<text x="' + X(0) + '" y="' + (Y(h) - 34) + '" font-size="11" fill="var(--amber)" font-weight="700">VIEW: ' + (face || 'FACE') + '</text>');
@@ -2158,11 +2284,15 @@ function drawParts() {
     '<td>' + Math.round(p.w * MM) + ' × ' + Math.round(p.h * MM) + ' × ' + Math.round(p.t * MM) + '</td>' +
     '<td>' + (p.groove != null ? 'GROOVE ' + Math.round(p.groove * MM) + ' MM UP' : p.inGroove ? 'IN GROOVE' : '') + '</td>' +
     '<td class="act"><button class="btn sm" data-dxf="' + i + '">DXF</button><button class="btn sm" data-nc="' + i + '"' + (cnc1Params(p) ? '' : ' disabled title="No CNC #1 work on this part"') + '>.NC</button></td></tr>').join('');
-  const hw = {}; ps.filter(p => p.hardware).forEach(p => hw[p.name] = (hw[p.name] || 0) + p.qty);
+  const hw = {}; ps.filter(p => p.hardware && !p.name.startsWith('CLOSET ROD')).forEach(p => hw[p.name] = (hw[p.name] || 0) + p.qty);   // rod hardware gets its annotated lines below
   const tally = (t, edge) => ps.reduce((a, p) => a + (p.holes || []).filter(h => h.type === t && (edge === undefined || h.edge === edge)).length * p.qty, 0);
   const cams = tally('CAM'), dow = tally('DOWEL', true), pins = ps.reduce((a, p) => a + (p.name === 'ADJ SHELF' ? 4 * p.qty : 0), 0);
   if (cams) { hw['CAM NUT Ø15 x 12.7'] = cams; hw['CAM PIN 34 MM (M6)'] = cams; }
   if (dow) hw['DOWEL 8 x 30 MM'] = dow; if (pins) hw['SHELF PIN 1/4"'] = pins;
+  ['A', 'B'].forEach(st => { const n = ps.filter(q => q.name === 'CLOSET ROD HOLDER ' + st).reduce((a2, q) => a2 + q.qty, 0);
+    if (n) { hw['CLOSET ROD HOLDER ' + st + ' (' + (ROD.styles[st].pocketZ * MM).toFixed(0) + ' MM POCKET)'] = n; hw['ROD HOLDER SCREW'] = (hw['ROD HOLDER SCREW'] || 0) + n * 2; } });
+  const rods = ps.filter(q => q.name === 'CLOSET ROD').reduce((a2, q) => a2 + q.qty, 0);
+  if (rods) hw['CLOSET ROD \u00d8' + (ROD.rodD * MM).toFixed(0) + ' MM \u00b7 CUT TO LENGTH'] = rods;
   let cupTotal = 0;
   ps.filter(p => p.hingeKind).forEach(p => { const n = p.holes.filter(h => h.type === 'HINGE').length * p.qty; if (!n) return;
     cupTotal += n; hw['HINGE 35 MM - ' + p.hingeKind] = (hw['HINGE 35 MM - ' + p.hingeKind] || 0) + n; });
@@ -2181,18 +2311,23 @@ function drawParts() {
     '<span><span style="display:inline-block;width:14px;height:3px;background:#ff6b6b;vertical-align:2px"></span> Groove / notch</span>' +
     '<span>Hollow = edge hole, on the edge</span></div>' +
     (sel2 ? '<div style="font-size:9.5px;color:var(--mute);margin:4px 2px 14px">' + sel2.w.toFixed(2) + '" \u00d7 ' + sel2.h.toFixed(2) + '" \u00d7 ' + sel2.t.toFixed(2) + '" \u00b7 view: ' + (sel2.frame ? faceWord(sel2, false) : 'FACE') + ' (cam lock face) \u00b7 edges: L=' + (pv.edges.eL || '\u2014') + ', R=' + (pv.edges.eR || '\u2014') + ', bottom of drawing=' + (pv.edges.eB || '\u2014') + ', top=' + (pv.edges.eT || '\u2014') + '</div>' : '');
+  const drillable2 = sel2 && cnc1Params(sel2);
   $('partsView').innerHTML = '<div class="grp"><div class="t">PANELS</div></div>' +
-    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">' + tabs + '</div>' +
-    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">' +
-      '<button class="btn sm" id="pnDxf">DXF \u00b7 THIS PANEL</button>' +
-      '<button class="btn sm" id="pnNc"' + (sel2 && cnc1Params(sel2) ? '' : ' disabled title="No CNC #1 work on this panel"') + '>.NC \u00b7 THIS PANEL</button>' +
+    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">' +
+      '<span style="font-size:9px;color:var(--mute);letter-spacing:.1em">OUTPUT</span>' +
+      '<button class="btn on sm" id="pnDxf">CAD</button>' +
+      '<button class="btn on sm" id="pnNc"' + (drillable2 ? '' : ' disabled') + '>CNC</button>' +
+      '<button class="btn on sm" id="pnCs"' + (drillable2 ? '' : ' disabled') + '>CUT SHEET</button>' +
       '<span style="font-size:9px;color:var(--mute)">' + (sel2 && sel2.holes ? sel2.holes.length + ' HOLES' : '') + '</span></div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' + tabs + '</div>' +
     pv.svg + legend +
     '<div class="grp" style="margin-top:20px"><div class="t">CUT LIST</div></div><table><thead><tr><th>PART</th><th>QTY</th><th>LENGTH</th><th>WIDTH</th><th>THICKNESS</th><th>MM</th><th>NOTES</th><th>EXPORT</th></tr></thead><tbody>' + rows + '</tbody></table>' + bom;
   $('partsView').querySelectorAll('[data-pn]').forEach(b => b.onclick = () => { UI.panel = b.dataset.pn; drawParts(); });
   const pd = $('pnDxf'), pn2 = $('pnNc');
   if (pd) pd.onclick = () => { const q = parts(M).find(x => x.name === UI.panel); if (q) download(stamp() + '_' + q.name.replace(/[^A-Za-z0-9]+/g, '_') + '.dxf', dxfPart(q), 'application/dxf'); };
   if (pn2) pn2.onclick = () => { const q = parts(M).find(x => x.name === UI.panel); if (q) download(stamp() + '_' + q.name.replace(/[^A-Za-z0-9]+/g, '') + '.nc', ncFor(q), 'text/plain'); };
+  const pc = $('pnCs');
+  if (pc) pc.onclick = () => { const q = parts(M).find(x => x.name === UI.panel); if (q) exportCutSheet(q); };
   $('partsView').querySelectorAll('[data-nc]').forEach(b => b.onclick = () => {
     const p = parts(M).filter(q => !q.hardware)[+b.dataset.nc]; if (!p) return;
     download(stamp() + '_' + p.name.replace(/[^A-Za-z0-9]+/g, '') + '.nc', ncFor(p), 'text/plain'); });
@@ -2260,7 +2395,7 @@ function openSaveDialog(res) {
     document.body.appendChild(ov); }
   ov.innerHTML = '<div style="width:min(460px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px">' +
     '<div style="color:var(--amber);font-weight:700;letter-spacing:.1em;font-size:12px;margin-bottom:6px">EXPORT FOLDER</div>' +
-    '<div style="font-size:10px;color:var(--mute);line-height:1.6;margin-bottom:12px">Everything this session exports goes into one job folder. The browser asks once where to put it \u2014 it opens on Downloads, so the default is one click.</div>' +
+    '<div style="font-size:10px;color:var(--mute);line-height:1.6;margin-bottom:12px">All exports go into one job folder. The browser asks once; it opens on Downloads.</div>' +
     '<label class="f" style="display:block;margin-bottom:14px">FOLDER NAME<input id="svName" value="' + (SAVE.folder || stamp()) + '" style="width:100%"></label>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
     '<button class="btn on" id="svDl">SAVE IN DOWNLOADS</button>' +
@@ -2291,7 +2426,7 @@ async function download(name, data, type) {
   } catch (e) { if (e.name === 'NotAllowedError') { SAVE.root = null; SAVE.denied = true; saveChip(); } } }
   plainDownload(name, blob);
 }
-const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.12'.slice(0, 10);
+const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.17'.slice(0, 10);
 
 function openFlyout(which) {
   UI.fly = which;
@@ -2338,9 +2473,7 @@ function openFlyout(which) {
         '<button class="btn sm" data-dnc="' + i + '">.NC</button>' +
         '<button class="btn sm" data-dcs="' + i + '">CUT SHEET</button>' +
         '<button class="btn sm" data-dtp="' + i + '">TOOLPATH</button></div>').join('') + '</div>' +
-      '<div class="note">Each .NC file is a complete CNC #1 program: face drilling first (inserts, then dowels), then the edge work, with the vacuum zones set for the panel width. ' +
-      'The cut sheet is the operator\u2019s two-page PDF \u2014 setup values, every hole position in drilling order, the checklist, and the panel layout drawn from the same waypoints as the g-code. ' +
-      'TOOLPATH shows those waypoints and can run the cycle on screen. Cam bores, shelf pins and hinge cups are over the bore limit and are listed in each file header as not programmed.</div>';
+      '<div class="note">.NC: the complete CNC #1 program. CUT SHEET: the operator\u2019s two-page PDF, from the same waypoints. TOOLPATH: view and run the cycle on screen. Over-bore work is listed in each file header as not programmed.</div>';
     foot.innerHTML = '<button class="btn on" id="fyGo">ALL .NC</button><button class="btn on" id="fyCs">ALL CUT SHEETS</button>';
     const readOpts = () => { EXP.drill = { edge: $('dEdge').value, faceCam: $('dCam').value, faceDowel: $('dDow').value, maxBore: +$('dMax').value }; };
     $('fyGo').onclick = async () => { readOpts(); await saveRoot();               // the folder pick needs the click
@@ -2363,8 +2496,7 @@ function openFlyout(which) {
       '<div class="grp">' + opt('TOOLS LINE', 'asTools', EXP.assy.tools ? '1' : '0', [['1', 'LIST THE TOOLS NEEDED'], ['0', 'LEAVE OFF']]) + '</div>' +
       '<div class="grp"><label class="f">EXTRA NOTE ON THE LAST PAGE<input id="asNotes" value="' + (EXP.assy.notes || '') + '" placeholder="OPTIONAL"></label></div>' +
       '<div class="grp"><div class="t">WHAT GOES OUT</div><div style="font-size:10px;color:var(--mute);line-height:1.6">' +
-      'A printable PDF: hardware table with letters and counts, numbered parts list, the completed assembly, and one figure per step. ' +
-      'Every step is generated from the drilled holes - pins and dowels stand in the face holes, and the part carrying the cam nuts and drilled edges fits one way only.</div></div>';
+      'A printable PDF: hardware table, parts list, one figure per step. Steps are read from the drilled holes.</div></div>';
     foot.innerHTML = '<button class="btn on" id="fyGo">EXPORT PDF</button>';
     $('fyGo').onclick = () => { EXP.assy = { spare: Math.max(0, +$('asSpare').value | 0), stickers: $('asStick').value === '1', tools: $('asTools').value === '1', notes: $('asNotes').value };
       buildInstructions(); };
@@ -2580,12 +2712,12 @@ async function buildInstructions() {
   const allB = numbered.flatMap(boxesOf); const caseW = Math.max(...allB.map(bb => bb.max[0]), 1);
   const flatBox = bb => ({ ...bb, min: [bb.min[2], bb.min[1], caseW - bb.max[0]], max: [bb.max[2], bb.max[1], caseW - bb.min[0]] });
   const lift = Math.max(2, M.H * 0.08);
-  const dstr = '2026-09-03.12'.slice(0, 10);
+  const dstr = '2026-09-03.17'.slice(0, 10);
   const stepsPerPage = 6; const totalPages = 1 + Math.ceil(plan.length / stepsPerPage);
   const header = pg => { pdf.page(); const lh = 34, lw = lh * logo.width / logo.height; pdf.image(logo, MG, MG, lw, lh);
     pdf.text(PW - MG, MG + 12, 'Assembly Instructions', 13, true, 'right'); pdf.text(PW - MG, MG + 30, 'MODEL NO.: ' + modelNo, 15, true, 'right');
     pdf.line(MG, MG + 44, PW - MG, MG + 44, 1.4); pdf.text(PW / 2, MG + 64, title, 18, true, 'center'); pdf.text(PW - MG, MG + 64, dstr, 8, false, 'right');
-    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.12', 7, false, 'right', 0.4); return MG + 76; };
+    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.17', 7, false, 'right', 0.4); return MG + 76; };
   let y = header(1);
   const cw = CW / hw.length, rowH = 78; pdf.rect(MG, y, CW, rowH, { lw: 0.9 });
   hw.forEach((r, i) => { const x = MG + i * cw; if (i) pdf.line(x, y, x, y + rowH, 0.9); pdf.rect(x, y, cw, 14, { fill: 0.9 }); pdf.text(x + cw / 2, y + 10, r.code, 8, true, 'center');
@@ -2663,7 +2795,7 @@ function ncFor(p) {
   const J = M.opt.joinery || JOINERY, maxB = EXP.drill.maxBore;
   const r = cnc1Program(P), code = Array.isArray(r.code) ? r.code.join('\n') : String(r.code || '');
   const head = [];
-  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.12 - ' + p.name + ' x' + p.qty);
+  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.17 - ' + p.name + ' x' + p.qty);
   head.push(';STOCK ' + p.t + '" - HOLE CENTERLINE ' + r3(P._ctr) + '" FROM THE CAM FACE');
   head.push(';PANEL LIES CAM FACE ' + (P._faceDown ? 'DOWN' : 'UP') + ': Z DEPTH OVERRIDE ' + P.zOverride + '" OFF THE TABLE');
   head.push(';LOAD TURNED 90 LEFT FROM THE DRAWING: ' + r3(p.w) + '" LONG SIDE RUNS DOWN Y (VACUUM ZONE), ' + r3(p.h) + '" ACROSS X');
@@ -2675,6 +2807,7 @@ function ncFor(p) {
   if (cnt('HINGE')) miss.push(cnt('HINGE') + 'x HINGE CUP ' + r3(J.hinge.cupD) + '" (' + Math.round(J.hinge.cupD * MM) + ' mm)');
   if (cnt('SCREW')) miss.push(cnt('SCREW') + 'x HINGE SCREW ' + r3(J.hinge.screwD) + '" (' + Math.round(J.hinge.screwD * MM) + ' mm)');
   if (cnt('GROMMET') || (p.lines || []).some(l => l.layer.startsWith('GROMMET'))) miss.push('GROMMET CUT - ROUTE ON THE POINT-TO-POINT');
+  if ((p.lines || []).some(l => l.layer === 'ROD_POCKET')) miss.push('CLOSET ROD POCKET ' + ((p.pocketZ || 0.2362) * MM).toFixed(0) + ' MM DEEP - ROUTE ON THE POINT-TO-POINT');
   if (miss.length) { head.push(';*** NOT IN THIS PROGRAM (CNC #1 DRILLS ' + maxB + '" AND UNDER) - DRILL ELSEWHERE ***'); miss.forEach(m => head.push(';   ' + m)); }
   return head.join('\n') + '\n' + code + '\n';
 }
@@ -2798,8 +2931,8 @@ $('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
 $('newBtn').onclick = () => { M = newCase(); HIST.past = []; HIST.future = []; HIST.last = null; UI.sc = null; UI.sel = { kind: 'case' }; $('preset').value = ''; $('job').value = M.job; render(); };
 $('job').onchange = () => { M.job = $('job').value; };
 $('saveBtn').onclick = () => {
-  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.12', saved: new Date().toISOString(), model: M };
-  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.12'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
+  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.17', saved: new Date().toISOString(), model: M };
+  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.17'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
 $('saveChip').onclick = () => { SAVE.root = null; SAVE.denied = false; SAVE.pending = null; saveRoot(); };
 $('loadBtn').onclick = () => $('loadFile').click();
 $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
@@ -2811,7 +2944,7 @@ $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
    Served over http: the page re-reads itself every minute and compares build stamps.
    Opened from a file: the browser blocks reading files, so tabs tell each other instead -
    opening a newer build in any tab tells every older tab on this machine. */
-const BUILD = '2026-09-03.12';
+const BUILD = '2026-09-03.17';
 const newer = (a, b) => { if (!a || !b) return false; const [da, na] = a.split('.'), [db, nb] = b.split('.');
   return da > db || (da === db && (+na || 0) > (+nb || 0)); };
 function showUpdate(build) { $('updateT').textContent = 'A NEW BUILD OF CASEMAKER IS AVAILABLE · ' + build + ' (YOU ARE ON ' + BUILD + ')'; $('update').classList.add('show'); }
