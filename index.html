@@ -89,7 +89,7 @@ label.f .mm{color:var(--mute);font-size:9px}
 <body>
 <div class="update" id="update"><span id="updateT">A NEW BUILD OF CASEMAKER IS AVAILABLE</span><button class="btn" id="updateGo">RELOAD</button><button class="x" id="updateX" title="Dismiss">✕</button></div>
 <header>
-  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.6 <span id="saveChip" style="color:var(--amber);cursor:pointer;margin-left:8px"></span></div></div>
+  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.9 <span id="saveChip" style="color:var(--amber);cursor:pointer;margin-left:8px"></span></div></div>
   <input class="job" id="job" value="NEW CASE">
   <select id="preset"><option value="">SAMPLE PRODUCTS</option></select>
   <div class="spacer"></div>
@@ -314,7 +314,7 @@ const resetIds = () => { _id = 0; };
 /* ---------- 2  DEFAULTS ---------- */
 const DEFAULTS = {
   case:   { W: 36, H: 48, D: 12, T: 1.03, backT: 1.03, kick: 2.75, kickInset: mm(1.5),
-            top: 'over', bottom: 'between', back: 'full', backEdge: 'flush',
+            top: 'over', bottom: 'between', back: 'full', backEdge: 'inset',   // the back sits 1 mm in from the rear edge unless set flush
             topFront: 0, topEnds: 0 },      // top overhang: forward of the case front, and per end
   drawer: { faceGap: mm(2),          // between drawer faces
             sideReveal: mm(1),       // each side of a face
@@ -459,7 +459,7 @@ function drawerStack(M, space, bay) {
     if (list[i] != null) return list[i];
     return kind === 'FILE' ? O.fileFaceH : O.boxFaceH;
   };
-  const inside = r4(M.back === 'none' ? M.D : M.D - M.backT);              // usable depth
+  const inside = r4(M.back === 'none' ? M.D : M.D - M.backT - (M.backEdge === 'flush' ? 0 : mm(1)));   // usable depth stops at the back's front face
   const opening = r4(space.x1 - space.x0);
   const boxOutside = r4(opening - 2 * O.slideClear);                        // slide clearance per side
   const boxInside  = r4(boxOutside - 2 * O.boxT);
@@ -564,7 +564,8 @@ function parts(M) {
       { min: [tx0, -tf, r4(M.H - T)], max: [M.top === 'over' ? r4(M.W + te) : r4(M.W - T), M.D, M.H] },
       { frame: { o: [tx0, -tf, 0], ux: [1, 0, 0], uy: [0, 1, 0], ax: 2, shown: r4(M.H - T), opp: M.H } });   // drawn from underneath
   }
-  const backY = M.back === 'none' ? M.D : r4(M.D - M.backT);                                 // where the back panel starts
+  const bkIn = M.backEdge === 'flush' ? 0 : mm(1);                                           // inset: the back sits 1 mm in from the rear
+  const backY = M.back === 'none' ? M.D : r4(M.D - M.backT - bkIn);                          // the back's front face - everything butting it stops here
   if (M.bottom !== 'none')
     P('BOTTOM', r4(M.W - 2 * T), backY, (M.caseBottomT || M.T), { min: [T, 0, M.kick], max: [r4(M.W - T), backY, r4(M.kick + (M.caseBottomT || M.T))] },   // butts into the back
       { frame: { o: [T, 0, 0], ux: [1, 0, 0], uy: [0, 1, 0], ax: 2, shown: M.kick, opp: r4(M.kick + (M.caseBottomT || M.T)) } });      // cam nuts underneath
@@ -573,7 +574,7 @@ function parts(M) {
       { min: [T, M.kickInset, 0], max: [r4(M.W - T), r4(M.kickInset + T), M.kick] },
       { frame: { o: [r4(M.W - T), 0, 0], ux: [-1, 0, 0], uy: [0, 0, 1], ax: 1, shown: r4(M.kickInset + T), opp: M.kickInset } });   // drawn from behind
   if (M.back !== 'none') {
-    const y0 = M.backEdge === 'flush' ? backY : r4(backY - mm(1));
+    const y0 = backY;
     const zTop = M.top === 'none' ? M.H : r4(M.H - T);
     P('BACK PANEL', r4(M.W - 2 * T), zTop, M.backT,                                          // floor to the underside of the top
       { min: [T, y0, 0], max: [r4(M.W - T), r4(y0 + M.backT), zTop] },
@@ -671,6 +672,7 @@ function loadPreset(name) {
   if (p.drawers) { b.content = 'drawers'; b.drawers = { ...p.drawers }; b.heights = p.heights || []; if (p.align) b.align = p.align;
     if (p.boxHeights) b.boxHeights = p.boxHeights; }
   if (p.boxSlide) M.opt.drawer.boxSlide = p.boxSlide;
+  if (p.backEdge) M.backEdge = p.backEdge;
   if (p.caseBottomT) M.caseBottomT = p.caseBottomT;
   if (p.boxFaceT) M.opt.drawer.boxFaceT = p.boxFaceT;
   if (p.fileFaceT) M.opt.drawer.fileFaceT = p.fileFaceT;                          // the product's own slides and reveals
@@ -1656,7 +1658,7 @@ function drawPlan() {
      exactly how the left-side drag behaves (its edge is the drawing origin, so it never moves) */
   const yShift = (UI.lock && UI.resize && UI.resize.which === 'h') ? (M.H - UI.resize.H0) * sc : 0;
   const X = x => padL + x * sc, Y = z => (h - pad) - z * sc + yShift;
-  UI.plan = { X, Y, toX: px => (px - pad) / sc, toZ: py => M.H - (py - pad) / sc };
+  UI.plan = { X, Y, toX: px => (px - padL) / sc, toZ: py => ((h - pad) + yShift - py) / sc };   // true inverses of X and Y
   const on = (k, i) => UI.sel.kind === k && String(UI.sel.id) === String(i), P = [];
   const RZ = { 'TOP': 'h', 'LEFT SIDE': 'wl' };                                    // grab the top for height, the left side for width
   const part = (kind, id, x, z, ww, hh, fill) => { const s = on(kind, id), rz = kind === 'part' ? RZ[id] : null;
@@ -1685,10 +1687,10 @@ function drawPlan() {
     P.push('</g>'); });
   M.shelves.forEach(s => part('shelf', s.id, s.x0, s.z, s.x1 - s.x0, T, 'rgba(120,170,255,.16)'));
   M.dividers.forEach(d => part('divider', d.id, d.x - T / 2, d.z0, T, d.z1 - d.z0, 'rgba(120,170,255,.16)'));
-  P.push('<foreignObject id="badge" x="0" y="0" width="196" height="28" style="visibility:hidden;pointer-events:none"><div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;gap:4px;align-items:center;background:#11151d;border:1px solid var(--amber);border-radius:5px;padding:2px 6px">' +
+  P.push('<foreignObject id="badge" x="0" y="0" width="196" height="28" style="visibility:hidden;pointer-events:none"><div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;gap:4px;align-items:center;background:#11151d;border:1px solid var(--amber);border-radius:5px;padding:2px 6px;pointer-events:none">' +
     '<span id="badgeL" style="color:var(--mute);font:9px var(--mono)"></span>' +
-    '<input id="badgeI" style="width:58px;background:transparent;border:0;color:var(--amber);font:11px var(--mono);outline:none;text-align:right">' +
-    '<button id="badgeC" title="Centre it in its space" style="background:var(--panel2);border:1px solid var(--line);border-radius:4px;color:var(--amber);font:8px var(--mono);letter-spacing:.06em;padding:3px 6px;cursor:pointer">CENTER</button></div></foreignObject>');
+    '<input id="badgeI" style="width:58px;background:transparent;border:0;color:var(--amber);font:11px var(--mono);outline:none;text-align:right;pointer-events:auto">' +
+    '<button id="badgeC" title="Centre it in its space" style="background:var(--panel2);border:1px solid var(--line);border-radius:4px;color:var(--amber);font:8px var(--mono);letter-spacing:.06em;padding:3px 6px;cursor:pointer;pointer-events:auto">CENTER</button></div></foreignObject>');
   P.push('<line id="ghost" x1="0" y1="0" x2="0" y2="0" stroke="var(--green)" stroke-width="2" stroke-dasharray="6 4" opacity="0"/>');
   /* the two case dimensions are fields, not labels */
   P.push('<foreignObject x="' + (X(M.W / 2) - 60) + '" y="' + (Y(M.H) - 32) + '" width="120" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;justify-content:center">' +
@@ -1715,11 +1717,12 @@ function drawPlan() {
   const at = e => { const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
     const q = pt.matrixTransform(svg.getScreenCTM().inverse()); return { x: UI.plan.toX(q.x), z: UI.plan.toZ(q.y) }; };
   svg.onclick = e => {
+    if (e.target.closest && e.target.closest('#badge')) return;               // the measurement badge is not blank space
     const g = e.target.closest('.hit');
     if (UI.tool === 'shelf' || UI.tool === 'divider') { addAt(at(e)); return; }
-    if (!g) { if (UI.sel.kind !== 'case') { UI.sel = { kind: 'case' }; render(); } return; }   // outside the case: back to the case settings
+    if (!g) { if (UI.sel.kind !== 'case') { UI.sel = { kind: 'case' }; render(); } return; }   // blank: back to the case settings
     const kind = g.dataset.k, id = g.dataset.i;
-    UI.sel = { kind, id }; render(); };
+    UI.sel = { kind, id }; render(); badge(kind, id); };
   svg.onmousemove = e => { const g = $('ghost'); if (!g) return;
     if (UI.tool !== 'shelf' && UI.tool !== 'divider') { g.setAttribute('opacity', 0); return; }
     const p = at(e), r = nearestSpace(p);
@@ -1733,7 +1736,10 @@ function drawPlan() {
     g.addEventListener('mouseenter', () => { UI.hover = { kind, id }; if (!UI.drag) badge(kind, id); });
     g.addEventListener('mouseleave', () => { UI.hover = null;
       if (!UI.drag && !(UI.sel.kind === kind && UI.sel.id === id)) UI.hideT = setTimeout(hideBadge, 350); });   // a selected part keeps its badge
-    g.addEventListener('mousedown', e => { if (UI.tool !== 'select') return; e.preventDefault(); UI.drag = { kind, id }; UI.sel = { kind, id }; badge(kind, id); });
+    g.addEventListener('mousedown', e => { if (UI.tool !== 'select') return; e.preventDefault();
+      const it = findPart(kind, id), p0 = at(e);                                 // keep the grab point: no snap to the cursor
+      UI.drag = { kind, id, moved: false, off: it ? (kind === 'shelf' ? it.z - p0.z : it.x - p0.x) : 0 };
+      UI.sel = { kind, id }; badge(kind, id); });
     g.addEventListener('dblclick', e => { e.preventDefault();
       const it = findPart(kind, id), cur = kind === 'shelf' ? it.z : it.x;
       const v = prompt((kind === 'shelf' ? 'HEIGHT FROM FLOOR' : 'X FROM LEFT') + ' (inches)', cur.toFixed(3));
@@ -1776,8 +1782,8 @@ function badge(kind, id) { const g = $('badge'), it = findPart(kind, id); if (!g
   if (document.activeElement !== inp) inp.value = v.toFixed(3);
   g.style.visibility = 'visible'; g.style.pointerEvents = 'all';
   /* anchored to the part: a shelf shows it at its right end, a divider at its top */
-  const ax = kind === 'shelf' ? Math.max(UI.plan.X(it.x0) + 4, UI.plan.X(it.x1) - 160) : UI.plan.X(it.x) - 75;   // stays inside the part's span
-  const ay = kind === 'shelf' ? UI.plan.Y(it.z) - 34 : UI.plan.Y(it.z1) + 6;
+  const ax = kind === 'shelf' ? Math.max(UI.plan.X(it.x0) + 4, UI.plan.X(it.x1) - 200) : UI.plan.X(it.x + M.T / 2) + 8;   // beside the part, never over it
+  const ay = kind === 'shelf' ? UI.plan.Y(it.z + M.T) - 32 : UI.plan.Y(it.z1) + 6;
   g.setAttribute('x', ax); g.setAttribute('y', ay);
   inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') { const n = parseFloat(inp.value);
       if (!isNaN(n)) { if (kind === 'shelf') it.z = r3(n); else it.x = r3(n); } hideBadge(); render(); }
@@ -1825,10 +1831,14 @@ addEventListener('mousemove', e => {
   if (!UI.drag || !UI.plan) return;
   const p = { x: UI.plan.toX(q.x), z: UI.plan.toZ(q.y) }, it = findPart(UI.drag.kind, UI.drag.id); if (!it) return;
   const snap = v => e.shiftKey ? v : Math.round(v * 16) / 16;
-  if (UI.drag.kind === 'shelf') it.z = r3(snap(Math.min(Math.max(p.z, M.kick + M.T + 1), M.H - 2 * M.T - 1)));
-  else it.x = r3(snap(Math.min(Math.max(p.x, M.T + 1), M.W - M.T - 1)));
+  UI.drag.moved = true;
+  const off = UI.drag.off || 0;
+  if (UI.drag.kind === 'shelf') it.z = r3(snap(Math.min(Math.max(p.z + off, M.kick + M.T + 1), M.H - 2 * M.T - 1)));
+  else it.x = r3(snap(Math.min(Math.max(p.x + off, M.T + 1), M.W - M.T - 1)));
   if (!UI.raf) UI.raf = requestAnimationFrame(() => { UI.raf = null; render(); if (UI.drag) badge(UI.drag.kind, UI.drag.id); }); });
-addEventListener('mouseup', () => { if (UI.resize) { UI.resize = null; UI.lock = null; hideBadge(); render(); } if (UI.drag) { UI.drag = null; hideBadge(); render(); } });
+addEventListener('mouseup', () => { if (UI.resize) { UI.resize = null; UI.lock = null; hideBadge(); render(); }
+  if (UI.drag) { const d = UI.drag; UI.drag = null;
+    if (d.moved) { hideBadge(); render(); } else { render(); badge(d.kind, d.id); } } });
 $('plan').addEventListener('mousedown', e => { if (e.target === $('plan')) { setTool('select'); if (UI.sel.kind !== 'case') { UI.sel = { kind: 'case' }; render(); } } });
 addEventListener('keydown', e => { if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.key === 'Escape') { setTool('select'); if (UI.sel.kind !== 'case') { UI.sel = { kind: 'case' }; render(); } }
@@ -2031,7 +2041,7 @@ function inspector() {
       SL('TOP', 'ptTop', M.top, [['over', 'OVER SIDES'], ['between', 'BETWEEN'], ['none', 'NONE']]) +
       SL('BOTTOM', 'ptBot', M.bottom, [['between', 'BETWEEN'], ['none', 'NONE']]) +
       SL('BACK', 'ptBack', M.back, [['full', 'FULL STOCK'], ['none', 'NONE']]) +
-      SL('BACK EDGE', 'ptBackE', M.backEdge, [['flush', 'FLUSH'], ['inset', 'INSET']]) + '</div></div>' +
+      SL('BACK EDGE', 'ptBackE', M.backEdge, [['inset', 'INSET 1 MM (DEFAULT)'], ['flush', 'FLUSH']]) + '</div></div>' +
     '<div class="grp"><div class="t">LAYOUT</div><div style="color:var(--mute);font-size:10px">Use <b style="color:var(--amber)">+ SHELF</b> and ' +
     '<b style="color:var(--amber)">+ DIVIDER</b> above the drawing, or press S and D. Drag a part to move it, double-click it to type a value, Delete removes it.</div></div>';
   bind('cW', v => M.W = v); bind('cH', v => M.H = v); bind('cD', v => M.D = v); bind('cT', v => M.T = v); bind('cBT', v => M.backT = v);
@@ -2221,7 +2231,7 @@ async function download(name, data, type) {
   } catch (e) { if (e.name === 'NotAllowedError') { SAVE.root = null; SAVE.denied = true; saveChip(); } } }
   plainDownload(name, blob);
 }
-const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.6'.slice(0, 10);
+const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.9'.slice(0, 10);
 
 function openFlyout(which) {
   UI.fly = which;
@@ -2510,12 +2520,12 @@ async function buildInstructions() {
   const allB = numbered.flatMap(boxesOf); const caseW = Math.max(...allB.map(bb => bb.max[0]), 1);
   const flatBox = bb => ({ ...bb, min: [bb.min[2], bb.min[1], caseW - bb.max[0]], max: [bb.max[2], bb.max[1], caseW - bb.min[0]] });
   const lift = Math.max(2, M.H * 0.08);
-  const dstr = '2026-09-03.6'.slice(0, 10);
+  const dstr = '2026-09-03.9'.slice(0, 10);
   const stepsPerPage = 6; const totalPages = 1 + Math.ceil(plan.length / stepsPerPage);
   const header = pg => { pdf.page(); const lh = 34, lw = lh * logo.width / logo.height; pdf.image(logo, MG, MG, lw, lh);
     pdf.text(PW - MG, MG + 12, 'Assembly Instructions', 13, true, 'right'); pdf.text(PW - MG, MG + 30, 'MODEL NO.: ' + modelNo, 15, true, 'right');
     pdf.line(MG, MG + 44, PW - MG, MG + 44, 1.4); pdf.text(PW / 2, MG + 64, title, 18, true, 'center'); pdf.text(PW - MG, MG + 64, dstr, 8, false, 'right');
-    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.6', 7, false, 'right', 0.4); return MG + 76; };
+    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.9', 7, false, 'right', 0.4); return MG + 76; };
   let y = header(1);
   const cw = CW / hw.length, rowH = 78; pdf.rect(MG, y, CW, rowH, { lw: 0.9 });
   hw.forEach((r, i) => { const x = MG + i * cw; if (i) pdf.line(x, y, x, y + rowH, 0.9); pdf.rect(x, y, cw, 14, { fill: 0.9 }); pdf.text(x + cw / 2, y + 10, r.code, 8, true, 'center');
@@ -2593,7 +2603,7 @@ function ncFor(p) {
   const J = M.opt.joinery || JOINERY, maxB = EXP.drill.maxBore;
   const r = cnc1Program(P), code = Array.isArray(r.code) ? r.code.join('\n') : String(r.code || '');
   const head = [];
-  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.6 - ' + p.name + ' x' + p.qty);
+  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.9 - ' + p.name + ' x' + p.qty);
   head.push(';STOCK ' + p.t + '" - HOLE CENTERLINE ' + r3(P._ctr) + '" FROM THE CAM FACE');
   head.push(';PANEL LIES CAM FACE ' + (P._faceDown ? 'DOWN' : 'UP') + ': Z DEPTH OVERRIDE ' + P.zOverride + '" OFF THE TABLE');
   head.push(';LOAD TURNED 90 LEFT FROM THE DRAWING: ' + r3(p.w) + '" LONG SIDE RUNS DOWN Y (VACUUM ZONE), ' + r3(p.h) + '" ACROSS X');
@@ -2728,8 +2738,8 @@ $('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
 $('newBtn').onclick = () => { M = newCase(); HIST.past = []; HIST.future = []; HIST.last = null; UI.sc = null; UI.sel = { kind: 'case' }; $('preset').value = ''; $('job').value = M.job; render(); };
 $('job').onchange = () => { M.job = $('job').value; };
 $('saveBtn').onclick = () => {
-  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.6', saved: new Date().toISOString(), model: M };
-  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.6'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
+  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.9', saved: new Date().toISOString(), model: M };
+  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.9'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
 $('saveChip').onclick = () => { SAVE.root = null; SAVE.denied = false; SAVE.pending = null; saveRoot(); };
 $('loadBtn').onclick = () => $('loadFile').click();
 $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
@@ -2741,7 +2751,7 @@ $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
    Served over http: the page re-reads itself every minute and compares build stamps.
    Opened from a file: the browser blocks reading files, so tabs tell each other instead -
    opening a newer build in any tab tells every older tab on this machine. */
-const BUILD = '2026-09-03.6';
+const BUILD = '2026-09-03.9';
 const newer = (a, b) => { if (!a || !b) return false; const [da, na] = a.split('.'), [db, nb] = b.split('.');
   return da > db || (da === db && (+na || 0) > (+nb || 0)); };
 function showUpdate(build) { $('updateT').textContent = 'A NEW BUILD OF CASEMAKER IS AVAILABLE · ' + build + ' (YOU ARE ON ' + BUILD + ')'; $('update').classList.add('show'); }
