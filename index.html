@@ -89,7 +89,7 @@ label.f .mm{color:var(--mute);font-size:9px}
 <body>
 <div class="update" id="update"><span id="updateT">A NEW BUILD OF CASEMAKER IS AVAILABLE</span><button class="btn" id="updateGo">RELOAD</button><button class="x" id="updateX" title="Dismiss">✕</button></div>
 <header>
-  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.17 <span id="saveChip" style="color:var(--amber);cursor:pointer;margin-left:8px"></span></div></div>
+  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.19 </div></div>
   <input class="job" id="job" value="NEW CASE">
   <select id="preset"><option value="">SAMPLE PRODUCTS</option></select>
   <span style="width:14px"></span>
@@ -118,7 +118,7 @@ label.f .mm{color:var(--mute);font-size:9px}
       <button class="btn" id="tShelf">ADD SHELF</button>
       <button class="btn" id="tDivider">ADD DIVIDER</button>
       <button class="btn danger" id="tDelete">DELETE</button>
-      <button class="btn" id="doorsEye" style="display:none">HIDE DOORS</button>
+      <button class="btn" id="doorsEye" style="display:none">HIDE FRONTS</button>
 <span class="hint" id="toolHint">CLICK A PART OR A SPACE · DRAG THE TOP OR THE LEFT SIDE TO RESIZE THE CASE · SHIFT FOR FREE MOVEMENT</span>
     </div>
     <div id="plan"></div>
@@ -129,7 +129,7 @@ label.f .mm{color:var(--mute);font-size:9px}
     <div class="hd"><div style="flex:1"><div class="k" id="selK">CASE</div><div class="s" id="selS"></div></div>
       <button class="btn danger" id="rmBtn" style="display:none">REMOVE</button></div>
     <div class="body" id="insp"></div>
-    <div class="iso"><div class="grp"><div class="t" style="display:flex;justify-content:space-between;align-items:center">ISO<span class="seg" style="width:220px"><button id="isoFaces" class="on">FACES</button><button id="isoOpen">OPEN</button><button id="isoFinish">FINISH</button></span></div><div id="iso"></div></div></div>
+    <div class="iso"><div class="grp"><div class="t" style="display:flex;justify-content:space-between;align-items:center">ISO<button class="btn sm" id="isoPop" title="Larger view with hardware">⤢</button></div><div id="iso"></div></div></div>
   </aside>
 </div>
 <div class="modal" id="optModal" hidden><div class="mbox">
@@ -352,7 +352,7 @@ const DEFAULTS = {
             topGap: mm(3) },         // under the top panel when hung from it
   shelf:  { frontGap: mm(2), sideClear: mm(0.5), pinDia: 0.25, pinPitch: mm(32),
             pinFirst: 6.437, pinFront: 2, pinBack: 2 },
-  door:   { style: 'inset', reveal: mm(2), insetClear: mm(2), cupK: mm(28), thickness: null, bottomZ: null }   // inset: flush in the opening (16 mm crank hinges); overlay: applied on the front
+  door:   { style: 'overlay', reveal: mm(2), insetClear: mm(2), cupK: mm(28), thickness: null, bottomZ: null }   // overlay: applied on the front (default); inset: flush in the opening
 };
 
 /* ---------- 3  MODEL ---------- */
@@ -492,7 +492,11 @@ function drawerStack(M, space, bay) {
   const floor = M.bottom === 'none' ? M.kick : r4(M.kick + (M.caseBottomT || M.T));
   const ceil  = M.top === 'none' ? M.H : r4(M.H - T2);
   const faceZ0 = space.z0 <= floor + 0.01 ? M.kick : space.z0;           // reaches the bottom: cover it
-  const faceZ1 = space.z1 >= ceil - 0.01 ? r4(M.H - O.topGap) : space.z1; // reaches the top: cover it, less the gap
+  /* a face may only run up past the top's front band if the top does not overhang the face
+     plane; a top proud of the faces (BFM per the drawing) forces them to tuck under it */
+  const fT0 = r4(Math.max(O.fileFaceT || 0, O.boxFaceT || 0) || M.T);
+  const topProud = M.top !== 'none' && r4(M.topFront === 'flush' ? M.T : (M.topFront || 0)) >= fT0 - 0.001;
+  const faceZ1 = space.z1 >= ceil - 0.01 && !topProud ? r4(M.H - O.topGap) : space.z1;
   const heights = kinds.map((k, i) => faceH(k, i));
   const total = r4(heights.reduce((a, v) => a + v, 0) + O.faceGap * (kinds.length - 1));
   const scale = 1;                                                       // faces are exactly the heights given
@@ -1786,8 +1790,8 @@ function drawPlan() {
     if (p.role || p.partId || p.name === 'ADJ SHELF' || p.name.startsWith('DOOR') || p.name === 'BACK PANEL') return;
     const b = p.box; part('part', p.name, b.min[0], b.min[2], b.max[0] - b.min[0], b.max[2] - b.min[2]);
   });
-  const anyDoors = PS.some(q => q.name.startsWith('DOOR'));
-  const eye = $('doorsEye'); if (eye) { eye.style.display = anyDoors ? '' : 'none'; eye.textContent = UI.hideDoors ? 'SHOW DOORS' : 'HIDE DOORS';
+  const anyDoors = PS.some(q => q.name.startsWith('DOOR') || q.role === 'face');
+  const eye = $('doorsEye'); if (eye) { eye.style.display = anyDoors ? '' : 'none'; eye.textContent = UI.hideDoors ? 'SHOW FRONTS' : 'HIDE FRONTS';
     eye.onclick = () => { UI.hideDoors = !UI.hideDoors; render(); }; }
   function drawDoorViz(d) {
     if (UI.hideDoors) return;
@@ -1821,7 +1825,7 @@ function drawPlan() {
       P.push('<g class="hit" data-k="rod" data-i="' + c.key + '" style="cursor:ns-resize">' +
         '<line x1="' + X(c.x0) + '" y1="' + Y(rz) + '" x2="' + X(c.x1) + '" y2="' + Y(rz) + '" stroke="' + (hot ? 'var(--amber)' : '#c9a227') + '" stroke-width="' + (2 * rr) + '" stroke-linecap="round" opacity=".55"/>' +
         [c.x0, c.x1].map(x2 => '<circle cx="' + X(x2) + '" cy="' + Y(rz) + '" r="' + (rr + 2.5) + '" fill="none" stroke="' + (hot ? 'var(--amber)' : '#c9a227') + '" stroke-width="2"/>').join('') + '</g>'); }
-    if (b.content === 'drawers') drawerStack(M, c, b).filter(p => p.role === 'face').forEach(f => {
+    if (b.content === 'drawers' && !UI.hideDoors) drawerStack(M, c, b).filter(p => p.role === 'face').forEach(f => {
       P.push('<rect x="' + X(f.box.min[0]) + '" y="' + Y(f.box.max[2]) + '" width="' + ((f.box.max[0] - f.box.min[0]) * sc) + '" height="' + ((f.box.max[2] - f.box.min[2]) * sc) +
         '" fill="rgba(245,165,36,.10)" stroke="var(--amber)" stroke-width="1.2"/>'); });
     if (b.content.indexOf('door') === 0) PS.filter(d => d.name.startsWith('DOOR') && d.doorFor === c.key).forEach(d => drawDoorViz(d));
@@ -2090,26 +2094,55 @@ function isoCanvas(boxes,opts){
 const ORBIT = { yaw: -24, el: 16, zoom: 1, drag: null, finish: false };
 const GREY = { body: '#9aa1ad', edge: '#d7dce4', banded: true };
 const CHERRY = { body: '#b06a3c', edge: '#c98a5a', banded: true };
+let BIG = false;
+function openIsoBig() {
+  let ov = $('isoOverlay');
+  if (!ov) { ov = document.createElement('div'); ov.id = 'isoOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:60;background:rgba(8,10,14,.88);display:flex;align-items:center;justify-content:center';
+    document.body.appendChild(ov); }
+  ov.innerHTML = '<div style="width:min(980px,94vw);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px">' +
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">' +
+    '<span style="color:var(--amber);font-weight:700;letter-spacing:.08em;font-size:12px">3D · WITH HARDWARE</span>' +
+    '<span style="color:var(--mute);font-size:9.5px">DRAG TO ORBIT · WHEEL TO ZOOM · DOUBLE-CLICK RESETS</span>' +
+    '<span style="flex:1"></span><button class="btn" id="isoBigClose">CLOSE</button></div>' +
+    '<div id="isoBigHost" style="background:#0f1218;border:1px solid var(--line);border-radius:8px"></div></div>';
+  ov.style.display = 'flex'; BIG = true; drawIsoBig();
+  $('isoBigClose').onclick = () => { ov.style.display = 'none'; BIG = false; };
+  ov.onclick = e => { if (e.target === ov) $('isoBigClose').onclick(); };
+}
+function drawIsoBig() {
+  const host = $('isoBigHost'); if (!host || !BIG) return;
+  const width = Math.min(950, innerWidth - 80), height = Math.min(640, innerHeight - 160);
+  const boxes = [];
+  parts(M).forEach(p => { if (UI.hideDoors && (p.role === 'face' || p.name.startsWith('DOOR'))) return;
+    (p.boxes || [p.box]).forEach(b => { if (b) boxes.push({ min: b.min, max: b.max,
+      hw: p.role === 'slide' ? 'slide' : p.hardware ? (p.name.includes('CASTER') || p.name.includes('GLIDE') ? 'glide' : p.name.includes('ROD') ? 'slide' : 'cam') : undefined }); }); });
+  const cv = isoCanvas(boxes, { w: width, h: height, ss: 2, dark: true, finish: M.finish === 'cherry' ? CHERRY : GREY, yaw: ORBIT.yaw, el: ORBIT.el, zoom: ORBIT.zoom });
+  cv.style.cssText = 'display:block;width:100%;cursor:grab';
+  cv.onmousedown = e => { ORBIT.drag = { x: e.clientX, y: e.clientY, yaw: ORBIT.yaw, el: ORBIT.el }; e.preventDefault(); };
+  cv.onwheel = e => { e.preventDefault(); ORBIT.zoom = Math.max(.4, Math.min(3, ORBIT.zoom * (e.deltaY < 0 ? 1.1 : .9))); drawIsoBig(); };
+  cv.ondblclick = () => { ORBIT.yaw = -24; ORBIT.el = 16; ORBIT.zoom = 1; drawIsoBig(); };
+  host.innerHTML = ''; host.appendChild(cv);
+}
 function drawIso() {
   const host = $('iso'), width = Math.max(200, host.clientWidth || 340), height = 250;
   const boxes = [];
-  parts(M).forEach(p => { if (UI.isoOpen && (p.role === 'face' || p.name.startsWith('DOOR'))) return;
+  parts(M).forEach(p => { if (UI.hideDoors && (p.role === 'face' || p.name.startsWith('DOOR'))) return;
     const hi = (UI.sel.kind === 'part' && UI.sel.id === p.name) || (p.partId && UI.sel.id === p.partId);
     (p.boxes || [p.box]).forEach(b => { if (b) boxes.push({ min: b.min, max: b.max, hi, hw: p.role === 'slide' ? 'slide' : undefined }); }); });
-  const cv = isoCanvas(boxes, { w: width, h: height, ss: 2, dark: true, finish: ORBIT.finish ? CHERRY : GREY, yaw: ORBIT.yaw, el: ORBIT.el, zoom: ORBIT.zoom });
+  const cv = isoCanvas(boxes, { w: width, h: height, ss: 2, dark: true, finish: M.finish === 'cherry' ? CHERRY : GREY, yaw: ORBIT.yaw, el: ORBIT.el, zoom: ORBIT.zoom });
   cv.style.width = '100%'; cv.style.height = height + 'px'; cv.style.display = 'block';
   cv.style.border = '1px solid var(--line)'; cv.style.borderRadius = '8px'; cv.style.cursor = 'grab';
   cv.onmousedown = e => { ORBIT.drag = { x: e.clientX, y: e.clientY, yaw: ORBIT.yaw, el: ORBIT.el }; e.preventDefault(); };
   cv.onwheel = e => { e.preventDefault(); ORBIT.zoom = Math.max(.4, Math.min(3, ORBIT.zoom * (e.deltaY < 0 ? 1.1 : .9))); drawIso(); };
   cv.ondblclick = () => { ORBIT.yaw = -24; ORBIT.el = 16; ORBIT.zoom = 1; drawIso(); };
+  const pop = $('isoPop'); if (pop) pop.onclick = openIsoBig;
   host.innerHTML = ''; host.appendChild(cv);
 }
 addEventListener('mousemove', e => { if (!ORBIT.drag) return;
-  ORBIT.yaw = ORBIT.drag.yaw + (e.clientX - ORBIT.drag.x) * .5; ORBIT.el = Math.max(-80, Math.min(80, ORBIT.drag.el + (e.clientY - ORBIT.drag.y) * .5)); drawIso(); });
+  ORBIT.yaw = ORBIT.drag.yaw + (e.clientX - ORBIT.drag.x) * .5; ORBIT.el = Math.max(-80, Math.min(80, ORBIT.drag.el + (e.clientY - ORBIT.drag.y) * .5)); (BIG ? drawIsoBig() : drawIso()); });
 addEventListener('mouseup', () => { ORBIT.drag = null; });
-$('isoFinish').onclick = () => { ORBIT.finish = !ORBIT.finish; $('isoFinish').classList.toggle('on', ORBIT.finish); drawIso(); };
-$('isoFaces').onclick = () => { UI.isoOpen = false; $('isoFaces').classList.add('on'); $('isoOpen').classList.remove('on'); drawIso(); };
-$('isoOpen').onclick = () => { UI.isoOpen = true; $('isoOpen').classList.add('on'); $('isoFaces').classList.remove('on'); drawIso(); };
+
 
 /* ---------- INSPECTOR ---------- */
 const F = (l, id, v, st) => '<label class="f">' + l + '<input id="' + id + '" type="number" step="' + (st || 0.0625) + '" value="' + r3(v) + '"><span class="mm">= ' + (v * MM).toFixed(1) + ' mm</span></label>';
@@ -2213,6 +2246,7 @@ function inspector() {
       SL('BOTTOM', 'ptBot', M.bottom, [['between', 'BETWEEN'], ['none', 'NONE']]) +
       SL('BACK', 'ptBack', M.back, [['full', 'FULL STOCK'], ['none', 'NONE']]) +
       SL('BACK EDGE', 'ptBackE', M.backEdge, [['inset', 'INSET 1 MM (DEFAULT)'], ['flush', 'FLUSH']]) + '</div></div>' +
+      '<div class="grp"><div class="t">FINISH</div>' + seg('', 'cFin', M.finish || 'grey', [['grey', 'GREY'], ['cherry', 'CHERRY']]) + '</div>' +
       (() => { const CB = bayOf(M, 'CASE'), on = CB.content === 'door' || CB.content === 'doors2';
         return '<div class="grp"><div class="t">DOORS ON THE WHOLE CASE</div>' +
           seg('', 'cdN', CB.content === 'doors2' ? 'doors2' : CB.content === 'door' ? 'door' : 'open', [['open', 'NONE'], ['door', 'ONE DOOR'], ['doors2', '2 DOORS']]) +
@@ -2220,13 +2254,13 @@ function inspector() {
             (CB.content === 'door' ? seg('HINGE SIDE', 'cdH', CB.hinge || 'L', [['L', 'LEFT'], ['R', 'RIGHT']]) : '') +
             '<div class="row" style="margin-top:8px">' +
             SL('HINGES PER DOOR', 'cdHn', CB.hinges || 'auto', [['auto', 'AUTO - BY DOOR HEIGHT'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5']]) +
-            '<label class="f">HINGE END DISTANCE<input id="cdHe" type="number" step="0.125" value="' + (CB.hingeEnd != null ? CB.hingeEnd : '') + '" placeholder="' + ((M.opt.joinery || JOINERY).hinge.end) + '"><span class="mm">CUP DISTANCE FROM THE DOOR ENDS</span></label></div>' +
-            '<div style="color:var(--mute);font-size:9.5px;margin-top:5px;line-height:1.5">HINGED ON THE CASE SIDES. INSET PUSHES THE INTERIOR BACK CLEAR OF THE DOORS. COMPARTMENTS WITH THEIR OWN DOOR ARE SKIPPED.</div>' : '') + '</div>'; })() +
+            '<label class="f">HINGE END DISTANCE<input id="cdHe" type="number" step="0.125" value="' + (CB.hingeEnd != null ? CB.hingeEnd : '') + '" placeholder="' + ((M.opt.joinery || JOINERY).hinge.end) + '"><span class="mm">CUP DISTANCE FROM THE DOOR ENDS</span></label></div>' : '') + '</div>'; })() +
     '<div class="grp"><div class="t">LAYOUT</div><div style="color:var(--mute);font-size:10px"><b style="color:var(--amber)">+ SHELF</b> / <b style="color:var(--amber)">+ DIVIDER</b> or S / D. Drag to move, double-click to type, Delete removes.</div></div>';
   (() => { const CB = bayOf(M, 'CASE');
     wire('cdN', v => CB.content = v); wire('cdS', v => CB.doorStyle = v); wire('cdH', v => CB.hinge = v);
     const hn = $('cdHn'); if (hn) hn.onchange = () => { CB.hinges = hn.value; render(); };
     const he = $('cdHe'); if (he) he.onchange = () => { CB.hingeEnd = he.value.trim() === '' ? null : parseFloat(he.value); render(); }; })();
+  wire('cFin', v => { M.finish = v; });
   bind('cW', v => M.W = v); bind('cH', v => M.H = v); bind('cD', v => M.D = v); bind('cT', v => M.T = v); bind('cBT', v => M.backT = v);
   bind('cK', v => M.kick = v); bind('cKI', v => M.kickInset = v); bind('cTF', v => M.topFront = v); bind('cTE', v => M.topEnds = v);
   bind('ptTop', v => M.top = v); bind('ptBot', v => M.bottom = v); bind('ptBack', v => M.back = v); bind('ptBackE', v => M.backEdge = v);
@@ -2374,59 +2408,14 @@ const EXP = { nest: { case: { sheet: '48,96', gap: 0.5, margin: 0.25, grain: 'ma
                       box:  { sheet: '48,96', gap: 0.25, margin: 0.25, grain: 'any' },
                       slot: { sheet: '48,96', gap: 0.25, margin: 0.25, grain: 'any' } },
               drill: { maxBore: 0.5, faceCam: 'T4', faceDowel: 'T10', edge: 'T9' },
-              three: { format: 'stl', units: 'in', faces: true } };
-/* ---- exports land in a job folder: <picked root>/<JOB_DATE>/file. One folder pick on the
-   first export (Chrome/Edge grant a writable handle); cancel or an unsupported browser falls
-   back to plain downloads for the session. Same pattern as the edge-drilling app's job location. */
-const SAVE = { root: null, denied: false, folder: null, pending: null };
-function saveRoot() {
-  if (SAVE.root || SAVE.denied) return Promise.resolve(SAVE.root);
-  if (!window.showDirectoryPicker) { SAVE.denied = true; return Promise.resolve(null); }
-  if (SAVE.pending) return SAVE.pending;
-  SAVE.pending = new Promise(res => openSaveDialog(res));
-  return SAVE.pending;
-}
-/* first export: confirm the folder - name prefilled JOB_DATE, location defaulting to Downloads,
-   with a custom location and a plain-downloads way out. One dialog per session. */
-function openSaveDialog(res) {
-  let ov = $('svOverlay');
-  if (!ov) { ov = document.createElement('div'); ov.id = 'svOverlay';
-    ov.style.cssText = 'position:fixed;inset:0;z-index:70;background:rgba(8,10,14,.86);display:flex;align-items:center;justify-content:center';
-    document.body.appendChild(ov); }
-  ov.innerHTML = '<div style="width:min(460px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px">' +
-    '<div style="color:var(--amber);font-weight:700;letter-spacing:.1em;font-size:12px;margin-bottom:6px">EXPORT FOLDER</div>' +
-    '<div style="font-size:10px;color:var(--mute);line-height:1.6;margin-bottom:12px">All exports go into one job folder. The browser asks once; it opens on Downloads.</div>' +
-    '<label class="f" style="display:block;margin-bottom:14px">FOLDER NAME<input id="svName" value="' + (SAVE.folder || stamp()) + '" style="width:100%"></label>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
-    '<button class="btn on" id="svDl">SAVE IN DOWNLOADS</button>' +
-    '<button class="btn" id="svPick">CHOOSE ANOTHER LOCATION\u2026</button>' +
-    '<span style="flex:1"></span><button class="btn" id="svPlain" title="No folder - files land loose in Downloads">PLAIN DOWNLOADS</button></div></div>';
-  ov.style.display = 'flex';
-  const done = v => { ov.style.display = 'none'; SAVE.pending = null; saveChip(); res(v); };
-  const pick = async startIn => { SAVE.folder = ($('svName').value.trim() || stamp()).replace(/[\\/:*?"<>|]+/g, '_');
-    try { SAVE.root = await showDirectoryPicker({ id: 'cm2exports', mode: 'readwrite', ...(startIn ? { startIn } : {}) }); }
-    catch (e) { SAVE.denied = true; }
-    done(SAVE.root); };
-  $('svDl').onclick = () => pick('downloads');
-  $('svPick').onclick = () => pick(null);
-  $('svPlain').onclick = () => { SAVE.denied = true; done(null); };
-}
-function saveChip() { const el = $('saveChip'); if (!el) return;
-  el.textContent = SAVE.root ? '\u2192 SAVING TO ' + SAVE.root.name + '/' + (SAVE.folder || stamp()) : (SAVE.denied && window.showDirectoryPicker ? 'PLAIN DOWNLOADS \u00b7 CLICK FOR A FOLDER' : '');
-  el.title = 'Click to change the export folder.'; }
-async function plainDownload(name, blob) { const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
-async function download(name, data, type) {
+              three: { format: 'dae', units: 'in', faces: true },
+              assy: { spare: 0, dims: false } };
+function download(name, data, type) {                                          // straight to the browser's download folder
   const blob = data instanceof Blob ? data : new Blob([data], { type: type || 'text/plain' });
-  const root = await saveRoot();
-  if (root) { try {
-    const dir = await root.getDirectoryHandle(SAVE.folder || stamp(), { create: true });
-    const fh = await dir.getFileHandle(name, { create: true });
-    const w = await fh.createWritable(); await w.write(blob); await w.close(); saveChip(); return;
-  } catch (e) { if (e.name === 'NotAllowedError') { SAVE.root = null; SAVE.denied = true; saveChip(); } } }
-  plainDownload(name, blob);
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.17'.slice(0, 10);
+const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.19'.slice(0, 10);
 
 function openFlyout(which) {
   UI.fly = which;
@@ -2451,12 +2440,12 @@ function openFlyout(which) {
       '<div class="grp"><div class="t">WHAT GOES OUT</div><div style="font-size:10px;color:var(--mute);line-height:1.6">' +
       'One DXF per sheet, per stock. Outlines on OUTLINE, every bore on its own layer (CAM_D15, PIN_D8 …) at finished size, grooves on GROOVE, labels on TEXT. R12, inch units.</div></div>';
     foot.innerHTML = '<button class="btn on" id="fyGo">EXPORT DXF</button>';
-    $('fyGo').onclick = async () => {
+    $('fyGo').onclick = () => {
       ['case', 'box', 'slot'].forEach(k => EXP.nest[k] = { sheet: $('n_' + k + '_sheet').value, gap: +$('n_' + k + '_gap').value, margin: +$('n_' + k + '_margin').value, grain: $('n_' + k + '_grain').value });
       const groups = { case: p => !p.hardware && !['side', 'frontback', 'bottom'].includes(p.role), box: p => p.role === 'side' || p.role === 'frontback', slot: p => p.role === 'bottom' };
-      let n = 0; await saveRoot();
+      let n = 0;
       ['case', 'box', 'slot'].forEach(k => { const sheets = nestParts(EXP.nest[k], groups[k]); if (!sheets.length) return;
-        sheets.forEach((sh, i) => { setTimeout(() => download(stamp() + '_' + k.toUpperCase() + '_SHEET' + (i + 1) + 'of' + sheets.length + '.dxf', dxfSheet(sh, i, sheets.length, EXP.nest[k], k.toUpperCase()), 'application/dxf'), n * (SAVE.root ? 50 : 350)); n++; }); });
+        sheets.forEach((sh, i) => { setTimeout(() => download(stamp() + '_' + k.toUpperCase() + '_SHEET' + (i + 1) + 'of' + sheets.length + '.dxf', dxfSheet(sh, i, sheets.length, EXP.nest[k], k.toUpperCase()), 'application/dxf'), n * 350); n++; }); });
       if (!n) alert('Nothing to nest.'); };
   }
   if (which === 'drill') {
@@ -2474,14 +2463,17 @@ function openFlyout(which) {
         '<button class="btn sm" data-dcs="' + i + '">CUT SHEET</button>' +
         '<button class="btn sm" data-dtp="' + i + '">TOOLPATH</button></div>').join('') + '</div>' +
       '<div class="note">.NC: the complete CNC #1 program. CUT SHEET: the operator\u2019s two-page PDF, from the same waypoints. TOOLPATH: view and run the cycle on screen. Over-bore work is listed in each file header as not programmed.</div>';
-    foot.innerHTML = '<button class="btn on" id="fyGo">ALL .NC</button><button class="btn on" id="fyCs">ALL CUT SHEETS</button>';
+    foot.innerHTML = '<div style="display:flex;gap:10px"><button class="btn on" id="fyGo">CNC #1 FILES</button><button class="btn on" id="fyCs">CUTSHEETS</button></div>';
     const readOpts = () => { EXP.drill = { edge: $('dEdge').value, faceCam: $('dCam').value, faceDowel: $('dDow').value, maxBore: +$('dMax').value }; };
-    $('fyGo').onclick = async () => { readOpts(); await saveRoot();               // the folder pick needs the click
+    $('fyGo').onclick = () => { readOpts();
       drillable.map(p => ({ name: stamp() + '_' + p.name.replace(/[^A-Za-z0-9]+/g, '') + '.nc', text: ncFor(p) }))
-        .forEach((f, i) => setTimeout(() => download(f.name, f.text, 'text/plain'), i * (SAVE.root ? 40 : 300)));
+        .forEach((f, i) => setTimeout(() => download(f.name, f.text, 'text/plain'), i * 300));
     };
-    $('fyCs').onclick = async () => { readOpts(); await saveRoot();
-      drillable.forEach((p, i) => setTimeout(() => exportCutSheet(p), i * (SAVE.root ? 60 : 400))); };
+    $('fyCs').onclick = async () => { readOpts();                              // one PDF, every panel's two pages in order
+      const logoCv = await printLogoCanvas();
+      const pdf = PDFDoc(), doc = jsPDFShim(pdf, logoCv);
+      drillable.forEach((p, i) => { if (i > 0) doc.addPage(); cnc1CutSheet(cnc1Params(p), doc); });
+      download(stamp() + '_CUTSHEETS.pdf', doc.output(), 'application/pdf'); };
     body.querySelectorAll('[data-dnc]').forEach(b => b.onclick = () => { readOpts(); const p = drillable[+b.dataset.dnc];
       download(stamp() + '_' + p.name.replace(/[^A-Za-z0-9]+/g, '') + '.nc', ncFor(p), 'text/plain'); });
     body.querySelectorAll('[data-dcs]').forEach(b => b.onclick = () => { readOpts(); exportCutSheet(drillable[+b.dataset.dcs]); });
@@ -2490,15 +2482,16 @@ function openFlyout(which) {
   if (which === 'assy') {
     const plan = asmPlan(), hwn = asmHardware();
     $('fyT').textContent = 'ASSEMBLY'; $('fyS').textContent = plan.steps.length + ' STEPS · ' + plan.graph.length + ' JOINTS · READ FROM THE DRILLED HOLES';
-    EXP.assy = EXP.assy || { spare: 2, stickers: true, tools: true, notes: '' };
+    EXP.assy = Object.assign({ spare: 0, dims: false, stickers: true, tools: true, notes: '' }, EXP.assy || {});
     body.innerHTML = '<div class="grp">' + num('SPARE HARDWARE PER ITEM', 'asSpare', EXP.assy.spare, 1).replace('step="1"', 'step="1" min="0"').replace('<span class="mm">= ' + (EXP.assy.spare * MM).toFixed(1) + ' mm</span>', '<span class="mm">EXTRA PIECES ADDED TO EACH LINE OF THE HARDWARE TABLE</span>') + '</div>' +
       '<div class="grp">' + opt('CAM COVER STICKERS', 'asStick', EXP.assy.stickers ? '1' : '0', [['1', 'INCLUDE (ONE PER CAM NUT)'], ['0', 'LEAVE OFF']]) + '</div>' +
       '<div class="grp">' + opt('TOOLS LINE', 'asTools', EXP.assy.tools ? '1' : '0', [['1', 'LIST THE TOOLS NEEDED'], ['0', 'LEAVE OFF']]) + '</div>' +
+      '<div class="grp">' + opt('PANEL DIMENSIONS', 'asDims', EXP.assy.dims ? '1' : '0', [['0', 'OFF'], ['1', 'SHOW ON THE PARTS LIST']]) + '</div>' +
       '<div class="grp"><label class="f">EXTRA NOTE ON THE LAST PAGE<input id="asNotes" value="' + (EXP.assy.notes || '') + '" placeholder="OPTIONAL"></label></div>' +
       '<div class="grp"><div class="t">WHAT GOES OUT</div><div style="font-size:10px;color:var(--mute);line-height:1.6">' +
       'A printable PDF: hardware table, parts list, one figure per step. Steps are read from the drilled holes.</div></div>';
     foot.innerHTML = '<button class="btn on" id="fyGo">EXPORT PDF</button>';
-    $('fyGo').onclick = () => { EXP.assy = { spare: Math.max(0, +$('asSpare').value | 0), stickers: $('asStick').value === '1', tools: $('asTools').value === '1', notes: $('asNotes').value };
+    $('fyGo').onclick = () => { EXP.assy = { spare: Math.max(0, +$('asSpare').value | 0), dims: $('asDims').value === '1', stickers: $('asStick').value === '1', tools: $('asTools').value === '1', notes: $('asNotes').value };
       buildInstructions(); };
   }
   if (which === '3d') {
@@ -2712,12 +2705,12 @@ async function buildInstructions() {
   const allB = numbered.flatMap(boxesOf); const caseW = Math.max(...allB.map(bb => bb.max[0]), 1);
   const flatBox = bb => ({ ...bb, min: [bb.min[2], bb.min[1], caseW - bb.max[0]], max: [bb.max[2], bb.max[1], caseW - bb.min[0]] });
   const lift = Math.max(2, M.H * 0.08);
-  const dstr = '2026-09-03.17'.slice(0, 10);
+  const dstr = '2026-09-03.19'.slice(0, 10);
   const stepsPerPage = 6; const totalPages = 1 + Math.ceil(plan.length / stepsPerPage);
   const header = pg => { pdf.page(); const lh = 34, lw = lh * logo.width / logo.height; pdf.image(logo, MG, MG, lw, lh);
     pdf.text(PW - MG, MG + 12, 'Assembly Instructions', 13, true, 'right'); pdf.text(PW - MG, MG + 30, 'MODEL NO.: ' + modelNo, 15, true, 'right');
     pdf.line(MG, MG + 44, PW - MG, MG + 44, 1.4); pdf.text(PW / 2, MG + 64, title, 18, true, 'center'); pdf.text(PW - MG, MG + 64, dstr, 8, false, 'right');
-    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.17', 7, false, 'right', 0.4); return MG + 76; };
+    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.19', 7, false, 'right', 0.4); return MG + 76; };
   let y = header(1);
   const cw = CW / hw.length, rowH = 78; pdf.rect(MG, y, CW, rowH, { lw: 0.9 });
   hw.forEach((r, i) => { const x = MG + i * cw; if (i) pdf.line(x, y, x, y + rowH, 0.9); pdf.rect(x, y, cw, 14, { fill: 0.9 }); pdf.text(x + cw / 2, y + 10, r.code, 8, true, 'center');
@@ -2726,7 +2719,9 @@ async function buildInstructions() {
   y += rowH + 14;
   const leftW = CW * 0.5; let py = y; pdf.text(MG, py + 9, 'PARTS', 9, true); py += 14;
   const cols = [MG, MG + 18, MG + 110, MG + 140]; pdf.text(cols[0], py + 8, '#', 7.5, true); pdf.text(cols[1], py + 8, 'PART', 7.5, true); pdf.text(cols[2], py + 8, 'QTY', 7.5, true); pdf.text(cols[3], py + 8, 'SIZE (in)', 7.5, true); pdf.line(MG, py + 11, MG + leftW - 10, py + 11, 0.7);
-  numbered.forEach(it => { py += 11; pdf.text(cols[0], py + 7, String(it.n), 8); pdf.text(cols[1], py + 7, it.p.name, 8); pdf.text(cols[2], py + 7, String(it.p.qty), 8); pdf.text(cols[3], py + 7, it.p.w + ' x ' + it.p.h + ' x ' + it.p.t, 8); pdf.line(MG, py + 10, MG + leftW - 10, py + 10, 0.4); });
+  numbered.forEach(it => { py += 11; pdf.text(cols[0], py + 7, String(it.n), 8);
+    pdf.text(cols[1], py + 7, it.p.name + (EXP.assy && EXP.assy.dims ? '  ' + r3(it.p.w) + '" \u00d7 ' + r3(it.p.h) + '" \u00d7 ' + r3(it.p.t) + '"' : ''), 8);
+    pdf.text(cols[2], py + 7, String(it.p.qty), 8); pdf.text(cols[3], py + 7, it.p.w + ' x ' + it.p.h + ' x ' + it.p.t, 8); pdf.line(MG, py + 10, MG + leftW - 10, py + 10, 0.4); });
   py += 22; pdf.rect(MG, py, leftW - 10, 52, { lw: 0.9 }); pdf.text(MG + 8, py + 13, 'IMPORTANT: FUNCTION OF CAM NUT', 8.5, true); pdf.line(MG + 8, py + 16, MG + leftW - 18, py + 16, 0.6);
   pdf.circle(MG + 26, py + 36, 9); pdf.circle(MG + 26, py + 36, 3); pdf.line(MG + 23.5, py + 36, MG + 28.5, py + 36, 0.8); pdf.poly([[MG + 36, py + 36], [MG + 33, py + 30], [MG + 39, py + 30]], { fill: 0 });
   pdf.text(MG + 44, py + 30, '1/4 TURN CLOCKWISE TO LOCK.', 7.5, true); pdf.text(MG + 44, py + 40, 'Arrow on the cam nut points toward the pin hole', 7); pdf.text(MG + 44, py + 49, 'before the cam nut is pushed into the panel.', 7);
@@ -2795,7 +2790,7 @@ function ncFor(p) {
   const J = M.opt.joinery || JOINERY, maxB = EXP.drill.maxBore;
   const r = cnc1Program(P), code = Array.isArray(r.code) ? r.code.join('\n') : String(r.code || '');
   const head = [];
-  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.17 - ' + p.name + ' x' + p.qty);
+  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.19 - ' + p.name + ' x' + p.qty);
   head.push(';STOCK ' + p.t + '" - HOLE CENTERLINE ' + r3(P._ctr) + '" FROM THE CAM FACE');
   head.push(';PANEL LIES CAM FACE ' + (P._faceDown ? 'DOWN' : 'UP') + ': Z DEPTH OVERRIDE ' + P.zOverride + '" OFF THE TABLE');
   head.push(';LOAD TURNED 90 LEFT FROM THE DRAWING: ' + r3(p.w) + '" LONG SIDE RUNS DOWN Y (VACUUM ZONE), ' + r3(p.h) + '" ACROSS X');
@@ -2931,9 +2926,8 @@ $('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
 $('newBtn').onclick = () => { M = newCase(); HIST.past = []; HIST.future = []; HIST.last = null; UI.sc = null; UI.sel = { kind: 'case' }; $('preset').value = ''; $('job').value = M.job; render(); };
 $('job').onchange = () => { M.job = $('job').value; };
 $('saveBtn').onclick = () => {
-  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.17', saved: new Date().toISOString(), model: M };
-  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.17'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
-$('saveChip').onclick = () => { SAVE.root = null; SAVE.denied = false; SAVE.pending = null; saveRoot(); };
+  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.19', saved: new Date().toISOString(), model: M };
+  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.19'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
 $('loadBtn').onclick = () => $('loadFile').click();
 $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
   f.text().then(t => { try { const d = JSON.parse(t); if (d.format !== 'CASEMAKER2') throw new Error('not a CASEMAKER 2 file');
@@ -2944,7 +2938,7 @@ $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
    Served over http: the page re-reads itself every minute and compares build stamps.
    Opened from a file: the browser blocks reading files, so tabs tell each other instead -
    opening a newer build in any tab tells every older tab on this machine. */
-const BUILD = '2026-09-03.17';
+const BUILD = '2026-09-03.19';
 const newer = (a, b) => { if (!a || !b) return false; const [da, na] = a.split('.'), [db, nb] = b.split('.');
   return da > db || (da === db && (+na || 0) > (+nb || 0)); };
 function showUpdate(build) { $('updateT').textContent = 'A NEW BUILD OF CASEMAKER IS AVAILABLE · ' + build + ' (YOU ARE ON ' + BUILD + ')'; $('update').classList.add('show'); }
