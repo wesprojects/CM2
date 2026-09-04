@@ -89,7 +89,7 @@ label.f .mm{color:var(--mute);font-size:9px}
 <body>
 <div class="update" id="update"><span id="updateT">A NEW BUILD OF CASEMAKER IS AVAILABLE</span><button class="btn" id="updateGo">RELOAD</button><button class="x" id="updateX" title="Dismiss">✕</button></div>
 <header>
-  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.21 </div></div>
+  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.32 </div></div>
   <input class="job" id="job" value="NEW CASE">
   <select id="preset"><option value="">SAMPLE PRODUCTS</option></select>
   <span style="width:14px"></span>
@@ -351,7 +351,7 @@ const DEFAULTS = {
             boxBoxH: mm(120), fileBoxH: mm(245),
             topGap: mm(3) },         // under the top panel when hung from it
   shelf:  { frontGap: mm(2), sideClear: mm(0.5), pinDia: 0.25, pinPitch: mm(32),
-            pinFirst: 6.437, pinFront: 3.5, pinBack: 2.5 },   // pattern sits half an inch to the rear, clear of the hinges
+            pinFirst: 6.437, pinFront: 2.5, pinBack: 3.5 },   // rows favour the front edge, still clear of the hinges
   door:   { style: 'overlay', reveal: mm(2), insetClear: mm(2), cupK: mm(28), thickness: null, bottomZ: null }   // overlay: applied on the front (default); inset: flush in the opening
 };
 
@@ -424,6 +424,15 @@ function addCross(M, x, z, space) {
   const above = spaces(M).find(c => Math.abs(c.z0 - (s.z + M.T)) < 0.01 && inSpan(c));
   return { shelf: s, lower: below ? addDivider(M, x, below) : null, upper: above ? addDivider(M, x, above) : null };
 }
+/* every grommet a bay carries; the old single-grommet fields migrate on first touch */
+function groList(b) {
+  if (!b.grommets) b.grommets = [];
+  if (b.grommet) { b.grommets.push({ shape: b.grommet === 'rect' ? 'rect' : 'round', host: b.groHost || 'top',
+    d: b.grod, w: b.grow, h: b.groh, r: b.gror, x: b.grox, y: b.groy, z: b.groz });
+    b.grommet = null; b.grod = b.grow = b.groh = b.gror = b.grox = b.groy = b.groz = b.groHost = null; }
+  return b.grommets;
+}
+
 function bayOf(M, key) {
   if (!M.bays[key]) M.bays[key] = { shelves: 0, content: 'open', drawers: { box: 0, file: 0 }, heights: [], grommet: null };
   return M.bays[key];
@@ -557,11 +566,15 @@ function drawerStack(M, space, bay) {
     /* slide pair — a placeholder solid until the real hardware model is imported */
     out.push({ id: nextId('SL'), role: 'slide', kind, name: kind + ' DRAWER SLIDE', hardware: true,
                w: boxDepth, h: mm(45), t: O.slideClear, qty: 2,
-               boxes: [
+               boxes: [                                                        // two members per side: cabinet channel + drawer rail (11435A13-style)
                  { min: [r4(space.x0), setback, r4(boxZ + 0.5)],
-                   max: [boxX, r4(setback + boxDepth), r4(boxZ + 0.5 + mm(45))] },
-                 { min: [r4(boxX + boxOutside), setback, r4(boxZ + 0.5)],
-                   max: [r4(space.x1), r4(setback + boxDepth), r4(boxZ + 0.5 + mm(45))] } ] });
+                   max: [r4(space.x0 + mm(7)), r4(setback + boxDepth), r4(boxZ + 0.5 + mm(45))] },
+                 { min: [r4(boxX - mm(6)), setback, r4(boxZ + 0.5 + mm(5))],
+                   max: [boxX, r4(setback + boxDepth), r4(boxZ + 0.5 + mm(40))] },
+                 { min: [r4(space.x1 - mm(7)), setback, r4(boxZ + 0.5)],
+                   max: [r4(space.x1), r4(setback + boxDepth), r4(boxZ + 0.5 + mm(45))] },
+                 { min: [r4(boxX + boxOutside), setback, r4(boxZ + 0.5 + mm(5))],
+                   max: [r4(boxX + boxOutside + mm(6)), r4(setback + boxDepth), r4(boxZ + 0.5 + mm(40))] } ] });
 
     z = r4(z + fh + O.faceGap * scale);
   });
@@ -878,25 +891,63 @@ function applyJoinery(M, out) {
       box: { min: [s2 > 0 ? x : r4(x - ST.out), r4(yc - r), r4(zc - r)],
              max: [s2 > 0 ? r4(x + ST.out) : x, r4(yc + r), r4(zt + r)] } }));
   });
-  /* grommets: cut into whatever forms the opening's ceiling (v1 rule) */
-  spaces(M).forEach(cc => { const b = bayOf(M, cc.key); if (!b.grommet) return;
-    const ceil = out.find(q => q.box && q.box.min && Math.abs(q.box.min[2] - cc.z1) < 0.02 &&
-      q.box.min[0] <= cc.x0 + 0.02 && q.box.max[0] >= cc.x1 - 0.02 && (q.name.startsWith('FIXED SHELF') || q.name === 'TOP'));
-    if (!ceil || !ceil.frame) return;
-    const offX = b.grox != null ? b.grox : r4((cc.x1 - cc.x0) / 2), gy = b.groy != null ? b.groy : 3;
-    const [lx, ly] = toDrawing(ceil, [r4(cc.x0 + offX), r4(ceil.box.max[1] - gy), ceil.box.min[2]]);
-    if (b.grommet === 'round') addHole(ceil, 'GROMMET', lx, ly, b.grod || 2.375, ceil.t);
-    else { const w = b.grow || 6, h = b.groh || 2, rr = Math.max(0, Math.min(b.gror != null ? b.gror : 0.5, Math.min(w, h) / 2));
-      const x0 = r4(lx - w / 2), x1 = r4(lx + w / 2), y0 = r4(ly - h / 2), y1 = r4(ly + h / 2), L = 'GROMMET_RECT';
-      const arc = (cx2, cy2, a0, a1) => { const N = 8; let px = null;
-        for (let i = 0; i <= N; i++) { const a = a0 + (a1 - a0) * i / N, x = r4(cx2 + rr * Math.cos(a)), y = r4(cy2 + rr * Math.sin(a));
-          if (px) addLine(ceil, L, px[0], px[1], x, y); px = [x, y]; } };
-      if (rr > 0.001) {
-        addLine(ceil, L, r4(x0 + rr), y0, r4(x1 - rr), y0); arc(r4(x1 - rr), r4(y0 + rr), -Math.PI / 2, 0);
-        addLine(ceil, L, x1, r4(y0 + rr), x1, r4(y1 - rr)); arc(r4(x1 - rr), r4(y1 - rr), 0, Math.PI / 2);
-        addLine(ceil, L, r4(x1 - rr), y1, r4(x0 + rr), y1); arc(r4(x0 + rr), r4(y1 - rr), Math.PI / 2, Math.PI);
-        addLine(ceil, L, x0, r4(y1 - rr), x0, r4(y0 + rr)); arc(r4(x0 + rr), r4(y0 + rr), Math.PI, 1.5 * Math.PI);
-      } else { addLine(ceil, L, x0, y0, x1, y0); addLine(ceil, L, x1, y0, x1, y1); addLine(ceil, L, x1, y1, x0, y1); addLine(ceil, L, x0, y1, x0, y0); } } });
+  /* grommets: through cuts in any panel around the compartment - ceiling, floor, either
+     side, or the back. A bay can carry any number. ROUND is a drilled/routed hole; SQUARE,
+     RECTANGLE, SLOT and OVAL are routed paths, and the squares and rectangles take a
+     corner radius. Every routed shape also records its ring so the 3D subtracts it. */
+  spaces(M).forEach(cc => { const b = bayOf(M, cc.key);
+    groList(b).forEach(g => {
+    const host = g.host || 'top';
+    const bkIn3 = M.backEdge === 'flush' ? 0 : mm(1);
+    const yB = M.back === 'none' ? M.D : r4(M.D - M.backT - bkIn3);              // the back's front face
+    const midX = r4((cc.x1 - cc.x0) / 2), midZ = r4((cc.z1 - cc.z0) / 2);
+    const ux = g.x != null ? g.x : midX;                                         // from the left of the space
+    const uy = g.y != null ? g.y : 3;                                            // in from the back
+    const uz = g.z != null ? g.z : midZ;                                         // up from the floor of the space
+    let pt = null, W = null;
+    if (host === 'top' || host === 'bottom') {
+      const z = host === 'top' ? cc.z1 : cc.z0, side = host === 'top' ? 'min' : 'max';
+      pt = out.find(q => q.box && q.frame && Math.abs(q.box[side][2] - z) < 0.02 &&
+        q.box.min[0] <= cc.x0 + 0.02 && q.box.max[0] >= cc.x1 - 0.02 &&
+        (q.name.startsWith('FIXED SHELF') || q.name === 'TOP' || q.name === 'BOTTOM'));
+      if (pt) W = [r4(cc.x0 + ux), r4(Math.min(pt.box.max[1], yB) - uy), pt.box[side][2]];
+    } else if (host === 'left' || host === 'right') {
+      const x = host === 'left' ? cc.x0 : cc.x1, side = host === 'left' ? 'max' : 'min';
+      pt = out.find(q => q.box && q.frame && Math.abs(q.box[side][0] - x) < 0.02 &&
+        q.box.min[2] <= cc.z0 + 0.05 && q.box.max[2] >= cc.z1 - 0.05 &&
+        (q.name.endsWith('SIDE') || q.name.startsWith('DIVIDER')));
+      if (pt) W = [x, r4(yB - uy), r4(cc.z0 + uz)];
+    } else if (host === 'back') {
+      pt = out.find(q => q.name === 'BACK PANEL' && q.frame);
+      if (pt) W = [r4(cc.x0 + ux), pt.box.min[1], r4(cc.z0 + uz)];
+    }
+    if (!pt || !W) return;
+    const [lx, ly] = toDrawing(pt, W);
+    const shape = g.shape || 'round';
+    if (shape === 'round') { addHole(pt, 'GROMMET', r4(lx), r4(ly), g.d || 2.375, pt.t); return; }
+    /* routed shapes share one ring builder */
+    const w = shape === 'square' ? (g.d || 3) : (g.w || 6);
+    const h = shape === 'square' ? (g.d || 3) : (g.h || 2);
+    let rr = shape === 'slot' ? h / 2 : shape === 'oval' ? 0 : Math.max(0, Math.min(g.r != null ? g.r : 0.5, Math.min(w, h) / 2));
+    const ring = [];
+    if (shape === 'oval') { const N2 = 32;                                       // a true ellipse
+      for (let i = 0; i < N2; i++) { const a2 = 2 * Math.PI * i / N2;
+        ring.push([r4(lx + (w / 2) * Math.cos(a2)), r4(ly + (h / 2) * Math.sin(a2))]); }
+    } else {
+      const x0 = r4(lx - w / 2), x1 = r4(lx + w / 2), y0 = r4(ly - h / 2), y1 = r4(ly + h / 2);
+      if (rr > 0.001) { const CN = 6;
+        const corner = (cx2, cy2, a0) => { for (let i = 0; i <= CN; i++) { const a2 = a0 + (Math.PI / 2) * i / CN;
+          ring.push([r4(cx2 + rr * Math.cos(a2)), r4(cy2 + rr * Math.sin(a2))]); } };
+        corner(r4(x1 - rr), r4(y0 + rr), -Math.PI / 2); corner(r4(x1 - rr), r4(y1 - rr), 0);
+        corner(r4(x0 + rr), r4(y1 - rr), Math.PI / 2); corner(r4(x0 + rr), r4(y0 + rr), Math.PI);
+      } else ring.push([x0, y0], [x1, y0], [x1, y1], [x0, y1]);
+    }
+    const L = 'GROMMET_RECT';
+    for (let i = 0; i < ring.length; i++) { const q1 = ring[i], q2 = ring[(i + 1) % ring.length];
+      addLine(pt, L, q1[0], q1[1], q2[0], q2[1]); }
+    pt.voids = [...(pt.voids || []), { ring: ring.map(q => [q[0], q[1]]) }];
+    }); });
+  function q0(pp, side, ax) { return pp.box[side][ax]; }
   /* drawer grooves */
   out.filter(p => p.groove != null).forEach(p => addLine(p, 'GROOVE', 0, p.groove, p.w, p.groove));
   trueViews(out);
@@ -912,6 +963,7 @@ function trueViews(list) {
     p.mirrored = true;                                                           // remembered for the panel viewer's note
     (p.holes || []).forEach(h => { h.x = r4(p.w - h.x); });
     (p.lines || []).forEach(l => { l.x1 = r4(p.w - l.x1); l.x2 = r4(p.w - l.x2); });
+    (p.voids || []).forEach(v => { v.ring = v.ring.map(q => [r4(p.w - q[0]), q[1]]).reverse(); });
     f.o = [0, 1, 2].map(i => f.o[i] + p.w * f.ux[i]); f.ux = f.ux.map(v => -v);  // keep world positions identical
     if (p.hingeEdge) p.hingeEdge = p.hingeEdge === 'L' ? 'R' : 'L';
   });
@@ -1768,6 +1820,7 @@ function redo() { if (!HIST.future.length) return; HIST.past.push(HIST.last); re
 
 /* ---------- PLAN ---------- */
 function drawPlan() {
+  const list0 = b2 => groList(b2).length;
   const C = spaces(M), T = M.T, pad = 34, padT = 44, padL = 112;
   /* fitted to the window between operations; frozen during a drag so a height change looks like one */
   const fit = Math.min(720 / M.W, 600 / M.H);
@@ -1821,7 +1874,22 @@ function drawPlan() {
       '<text x="' + (X(c.x0) + 6) + '" y="' + (Y(c.z1) + 14) + '" font-size="10" fill="' + (s ? 'var(--amber)' : 'var(--mute)') + '">' + c.id + '</text>');
     adjShelfZ(M, c, b.shelves).forEach(z => {
       P.push('<rect x="' + X(c.x0) + '" y="' + Y(z + T) + '" width="' + ((c.x1 - c.x0) * sc) + '" height="' + (T * sc) + '" fill="rgba(255,255,255,.10)" stroke="var(--mute)" stroke-width="1" stroke-dasharray="4 3"/>'); });
-    if (b.grommet) P.push('<circle cx="' + X((c.x0 + c.x1) / 2) + '" cy="' + (Y(c.z1) - 9) + '" r="5" fill="none" stroke="var(--red)" stroke-width="1.4"/>');
+    groList(b).forEach((gg, gi) => { const id = c.key + '@' + gi, g = groAt(id); if (!g) return;
+      const hot = on('grommet', id), gr = hot ? 'var(--amber)' : 'var(--red)';
+      const gw = (g.shape === 'round' ? (gg.d || 2.375) : g.shape === 'square' ? (gg.d || 3) : (gg.w || 6)) * sc;
+      const gh = (g.shape === 'round' ? (gg.d || 2.375) : g.shape === 'square' ? (gg.d || 3) : (gg.h || 2)) * sc;
+      let gx, gy;
+      if (g.host === 'back') { gx = X(g.x); gy = Y(g.z); }
+      else if (g.host === 'top') { gx = X(g.x); gy = Y(c.z1) + 6 + (g.y - 3) * 0; }
+      else if (g.host === 'bottom') { gx = X(g.x); gy = Y(c.z0) - 6; }
+      else { gx = g.host === 'left' ? X(c.x0) + 6 : X(c.x1) - 6; gy = Y(g.z); }
+      const rx = Math.max(5, gw / 2), ry = Math.max(4, gh / 2);
+      const rrad = g.shape === 'slot' ? ry : Math.min((gg.r != null ? gg.r : (g.shape === 'square' || g.shape === 'rect' ? 0.5 : 0)) * sc, ry);
+      const body = g.shape === 'round' || g.shape === 'oval'
+        ? '<ellipse cx="' + gx + '" cy="' + gy + '" rx="' + rx + '" ry="' + ry + '" fill="rgba(255,107,107,.12)" stroke="' + gr + '" stroke-width="1.6" stroke-dasharray="5 3"/>'
+        : '<rect x="' + (gx - rx) + '" y="' + (gy - ry) + '" width="' + (2 * rx) + '" height="' + (2 * ry) + '" rx="' + rrad + '" fill="rgba(255,107,107,.12)" stroke="' + gr + '" stroke-width="1.6" stroke-dasharray="5 3"/>';
+      P.push('<g class="hit" data-k="grommet" data-i="' + id + '" style="cursor:move">' + body +
+        (list0(b) > 1 ? '<text x="' + gx + '" y="' + (gy + 3) + '" text-anchor="middle" font-size="9" fill="' + gr + '">' + (gi + 1) + '</text>' : '') + '</g>'); });
     if (b.rod) { const rz = c.z1 - (b.rodBelow != null ? b.rodBelow : ROD.belowTop), rr = Math.max(3, ((b.rodD || ROD.rodD) / 2) * sc);
       const hot = on('rod', c.key);
       P.push('<g class="hit" data-k="rod" data-i="' + c.key + '" style="cursor:ns-resize">' +
@@ -1871,7 +1939,7 @@ function drawPlan() {
     if (UI.tool === 'shelf' || UI.tool === 'divider') { addAt(at(e)); return; }
     if (!g) { if (UI.sel.kind !== 'case') { UI.sel = { kind: 'case' }; render(); } return; }   // blank: back to the case settings
     const kind = g.dataset.k, id = g.dataset.i;
-    UI.sel = kind === 'rod' ? { kind: 'bay', id } : { kind, id }; render(); badge(kind === 'rod' ? 'rod' : kind, id); };
+    UI.sel = (kind === 'rod' || kind === 'grommet') ? { kind: 'bay', id } : { kind, id }; render(); badge(kind, id); };
   svg.onmousemove = e => { const g = $('ghost'); if (!g) return;
     if (UI.tool !== 'shelf' && UI.tool !== 'divider') { g.setAttribute('opacity', 0); return; }
     const p = at(e), r = nearestSpace(p);
@@ -1880,15 +1948,18 @@ function drawPlan() {
     if (UI.tool === 'shelf') { g.setAttribute('x1', X(r.x0)); g.setAttribute('x2', X(r.x1)); g.setAttribute('y1', Y(p.z)); g.setAttribute('y2', Y(p.z)); }
     else { g.setAttribute('y1', Y(r.z0)); g.setAttribute('y2', Y(r.z1)); g.setAttribute('x1', X(p.x)); g.setAttribute('x2', X(p.x)); } };
   svg.onmouseleave = () => { const g = $('ghost'); if (g) g.setAttribute('opacity', 0); hideBadge(); };
-  svg.querySelectorAll('[data-k="shelf"],[data-k="divider"],[data-k="rod"]').forEach(g => {
+  svg.querySelectorAll('[data-k="shelf"],[data-k="divider"],[data-k="rod"],[data-k="grommet"]').forEach(g => {
     const kind = g.dataset.k, id = g.dataset.i;
     g.addEventListener('mouseenter', () => { UI.hover = { kind, id }; if (!UI.drag) badge(kind, id); });
     g.addEventListener('mouseleave', () => { UI.hover = null;
       if (!UI.drag && !(UI.sel.kind === kind && UI.sel.id === id)) UI.hideT = setTimeout(hideBadge, 350); });   // a selected part keeps its badge
     g.addEventListener('mousedown', e => { if (UI.tool !== 'select') return; e.preventDefault();
       const it = findPart(kind, id), p0 = at(e);                                 // keep the grab point: no snap to the cursor
-      UI.drag = { kind, id, moved: false, off: it ? (kind === 'divider' ? it.x - p0.x : it.z - p0.z) : 0 };
-      UI.sel = kind === 'rod' ? { kind: 'bay', id } : { kind, id }; badge(kind, id); });
+      UI.drag = { kind, id, moved: false,
+        off: it ? (kind === 'divider' ? it.x - p0.x : kind === 'grommet' ? 0 : it.z - p0.z) : 0,
+        offX: it && kind === 'grommet' ? it.x - p0.x : 0, offZ: it && kind === 'grommet' ? it.z - p0.z : 0,
+        y0: it && kind === 'grommet' ? it.y : 0, px0: p0.x, pz0: p0.z };
+      UI.sel = (kind === 'rod' || kind === 'grommet') ? { kind: 'bay', id } : { kind, id }; badge(kind, id); });
     g.addEventListener('dblclick', e => { e.preventDefault();
       const it = findPart(kind, id), cur = kind === 'divider' ? it.x : it.z;
       const v = prompt((kind === 'divider' ? 'X FROM LEFT' : 'HEIGHT FROM FLOOR') + ' (inches)', cur.toFixed(3));
@@ -1901,8 +1972,20 @@ function drawPlan() {
     UI.sel.kind === 'divider' ? 'DIVIDER' : (UI.sel.id || 'CASE');
 }
 const findPart = (kind, id) => kind === 'shelf' ? M.shelves.find(s => s.id === id) :
-  kind === 'rod' ? rodAt(id) : M.dividers.find(d => d.id === id);
-/* the rod acts like a shelf: one z value, stored as the distance below its space's top */
+  kind === 'rod' ? rodAt(id) : kind === 'grommet' ? groAt(id) : M.dividers.find(d => d.id === id);
+/* one grommet by bay key and index: x along the space, y in from the back, z up the space */
+function groAt(id) { const [key, si] = String(id).split('@'); const i = +si || 0;
+  const c = spaces(M).find(q => q.key === key); if (!c) return null;
+  const b = bayOf(M, key), list = groList(b), g = list[i]; if (!g) return null;
+  const yHi = M.back === 'none' ? M.D : r3(M.D - M.backT - 0.0394);
+  return { c, b, g, i, key, host: g.host || 'top', shape: g.shape || 'round', x0: c.x0, x1: c.x1,
+    get x() { return r3(c.x0 + (g.x != null ? g.x : (c.x1 - c.x0) / 2)); },
+    set x(v) { g.x = r3(Math.min(Math.max(v - c.x0, 0.5), c.x1 - c.x0 - 0.5)); },
+    get y() { return r3(g.y != null ? g.y : 3); },                              // in from the back
+    set y(v) { g.y = r3(Math.min(Math.max(v, 0.5), yHi - 0.5)); },
+    get z() { return r3(c.z0 + (g.z != null ? g.z : (c.z1 - c.z0) / 2)); },
+    set z(v) { g.z = r3(Math.min(Math.max(v - c.z0, 0.5), c.z1 - c.z0 - 0.5)); } }; }
+/* the rod acts/* the rod acts like a shelf: one z value, stored as the distance below its space's top */
 function rodAt(key) { const c = spaces(M).find(q => q.key === key); if (!c) return null;
   const b = bayOf(M, key);
   return { c, b, x0: c.x0, x1: c.x1,
@@ -1933,16 +2016,16 @@ $('tDivider').onclick = () => setTool(UI.tool === 'divider' ? 'select' : 'divide
 $('tDelete').onclick = () => deleteSelected();
 function deleteSelected() { if (UI.sel.kind === 'shelf' || UI.sel.kind === 'divider') removePart(UI.sel.kind, UI.sel.id); }
 function badge(kind, id) { const g = $('badge'), it = findPart(kind, id); if (!g || !it || !UI.plan) return;
-  const v = kind === 'divider' ? it.x : it.z, inp = $('badgeI');
-  $('badgeL').textContent = kind === 'divider' ? 'X' : kind === 'rod' ? 'ROD HEIGHT' : 'HEIGHT';
+  const v = kind === 'divider' ? it.x : kind === 'grommet' ? (it.host === 'left' || it.host === 'right' ? it.z : it.x) : it.z, inp = $('badgeI');
+  $('badgeL').textContent = kind === 'divider' ? 'X' : kind === 'rod' ? 'ROD HEIGHT' : kind === 'grommet' ? (it.host === 'left' || it.host === 'right' ? 'GROMMET Z' : 'GROMMET X') : 'HEIGHT';
   if (document.activeElement !== inp) inp.value = v.toFixed(3);
   g.style.visibility = 'visible'; g.style.pointerEvents = 'all';
   /* anchored to the part: a shelf shows it at its right end, a divider at its top */
   const ax = kind === 'divider' ? UI.plan.X(it.x + M.T / 2) + 8 : Math.max(UI.plan.X(it.x0) + 4, UI.plan.X(it.x1) - 200);
-  const ay = kind === 'divider' ? UI.plan.Y(it.z1) + 6 : kind === 'rod' ? UI.plan.Y(it.z) - 34 : UI.plan.Y(it.z + M.T) - 32;
+  const ay = kind === 'divider' ? UI.plan.Y(it.z1) + 6 : kind === 'rod' ? UI.plan.Y(it.z) - 34 : kind === 'grommet' ? UI.plan.Y(it.host === 'top' ? it.c.z1 : it.host === 'bottom' ? it.c.z0 : it.z) - 40 : UI.plan.Y(it.z + M.T) - 32;
   g.setAttribute('x', ax); g.setAttribute('y', ay);
   inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') { const n = parseFloat(inp.value);
-      if (!isNaN(n)) { if (kind === 'divider') it.x = r3(n); else it.z = r3(n); } hideBadge(); render(); }
+      if (!isNaN(n)) { if (kind === 'divider') it.x = r3(n); else if (kind === 'grommet' && !(it.host === 'left' || it.host === 'right')) it.x = r3(n); else it.z = r3(n); } hideBadge(); render(); }
     if (e.key === 'Escape') hideBadge(); };
   inp.onmousedown = e => e.stopPropagation();
   const bc = $('badgeC'); bc.style.display = '';
@@ -1962,6 +2045,7 @@ function sizeBadge() { const R = UI.resize, g = $('badge'), inp = $('badgeI'); i
 function centerPart(kind, id) {
   const it = findPart(kind, id); if (!it) return; const C = spaces(M), T = M.T;
   if (kind === 'rod') { it.b.rodBelow = r3((it.c.z1 - it.c.z0) / 2); render(); badge(kind, id); return; }
+  if (kind === 'grommet') { it.b.grox = null; it.b.groz = null; render(); badge(kind, id); return; }   // back to the centre of the space
   if (kind === 'shelf') {
     const below = C.find(c => Math.abs(c.z1 - it.z) < 0.02 && c.x1 > it.x0 + 0.01 && c.x0 < it.x1 - 0.01);
     const above = C.find(c => Math.abs(c.z0 - (it.z + T)) < 0.02 && c.x1 > it.x0 + 0.01 && c.x0 < it.x1 - 0.01);
@@ -1991,6 +2075,14 @@ addEventListener('mousemove', e => {
   UI.drag.moved = true;
   const off = UI.drag.off || 0;
   if (UI.drag.kind === 'divider') it.x = r3(snap(Math.min(Math.max(p.x + off, M.T + 1), M.W - M.T - 1)));
+  else if (UI.drag.kind === 'grommet') {                                        // every host drags on both axes
+    if (it.host === 'back') { it.x = r3(snap(p.x + UI.drag.offX)); it.z = r3(snap(p.z + UI.drag.offZ)); }
+    else if (it.host === 'top' || it.host === 'bottom') {                       // vertical movement walks the depth: up = toward the back
+      it.x = r3(snap(p.x + UI.drag.offX));
+      it.y = r3(snap(UI.drag.y0 + ((it.host === 'top' ? 1 : -1) * (p.z - UI.drag.pz0)))); }
+    else {                                                                      // sides: horizontal walks the depth: outward = toward the back
+      it.z = r3(snap(p.z + UI.drag.offZ));
+      it.y = r3(snap(UI.drag.y0 + ((it.host === 'left' ? -1 : 1) * (p.x - UI.drag.px0)))); } }
   else if (UI.drag.kind === 'rod') it.z = r3(snap(p.z + off));                  // the setter clamps inside its space
   else it.z = r3(snap(Math.min(Math.max(p.z + off, M.kick + M.T + 1), M.H - 2 * M.T - 1)));
   if (!UI.raf) UI.raf = requestAnimationFrame(() => { UI.raf = null; render(); if (UI.drag) badge(UI.drag.kind, UI.drag.id); }); });
@@ -2074,7 +2166,8 @@ function isoCanvas(boxes,opts){
     const x0=Math.max(0,Math.floor(C[0]-ext)),x1=Math.min(W-1,Math.ceil(C[0]+ext)),y0=Math.max(0,Math.floor(C[1]-ext)),y1=Math.min(H-1,Math.ceil(C[1]+ext));
     for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){ const dx=x+0.5-C[0],dy=y+0.5-C[1];
       const u=( dx*a2[1]-dy*a2[0])/det, v=(-dx*a1[1]+dy*a1[0])/det; const q=u*u+v*v; if(q>1) continue;
-      const k=y*W+x; if(id[k]<0||C[2]<zb[k]-0.12) continue;
+      const zpx=C[2]+u*(P1[2]-C[2])+v*(P2[2]-C[2]);                             // the bore's own plane depth at this pixel
+      const k=y*W+x; if(id[k]<0||zpx<zb[k]-0.12) continue;
       const o=k*4, dkr=q>0.55?0.25:0.45;                 // rim darker than the bore
       px[o]=Math.round(px[o]*dkr); px[o+1]=Math.round(px[o+1]*dkr); px[o+2]=Math.round(px[o+2]*dkr); } });
   // edges: pixels where the face id changes are silhouettes / creases → ink
@@ -2096,6 +2189,35 @@ function isoCanvas(boxes,opts){
 const ORBIT = { yaw: -24, el: 16, zoom: 1, drag: null, finish: false };
 const GREY = { body: '#9aa1ad', edge: '#d7dce4', banded: true };
 const CHERRY = { body: '#b06a3c', edge: '#c98a5a', banded: true };
+function isoHoles(list) {                                                     // dark bores for the ISO: real positions, both faces when through
+  const out = [];
+  list.forEach(p => { if (!p.frame || p.hardware) return; const f = p.frame;
+    const n = [0, 0, 0]; n[f.ax] = Math.sign(f.shown - f.opp) || 1;
+    const face = which => which === 'shown' ? { at: 'shown', nrm: n } : { at: 'opp', nrm: n.map(v => -v) };
+    const put = (x, y, rx, ry, which) => { const F = face(which), c = toWorld(p, x, y, F.at);
+      out.push({ c: c.map((v, i) => v + F.nrm[i] * 0.01),
+        e1: f.ux.map(v => v * rx), e2: f.uy.map(v => v * ry) }); };
+    (p.holes || []).forEach(h => {
+      if (h.edge) {                                                             // only the glide bores: every other edge bore hides in a joint
+        if (h.type !== 'GLIDE') return;
+        const C = edgeHoleWorld(p, h), r2 = h.d / 2;
+        let en;                                                                  // the edge's outward normal
+        if (h.x <= 0.02) en = f.ux.map(v => -v); else if (h.x >= p.w - 0.02) en = f.ux;
+        else if (h.y <= 0.02) en = f.uy.map(v => -v); else en = f.uy;
+        const alongE = (h.x <= 0.02 || h.x >= p.w - 0.02) ? f.uy : f.ux;        // in the edge plane
+        const thick = [0, 0, 0]; thick[f.ax] = 1;
+        out.push({ c: C.map((v, i) => v + en[i] * 0.01), e1: alongE.map(v => v * r2), e2: thick.map(v => v * r2) });
+        return; }
+      const thru = (h.z || 0) >= p.t - 0.01, r = h.d / 2;
+      if (thru) { put(h.x, h.y, r, r, 'shown'); put(h.x, h.y, r, r, 'opp'); }
+      else put(h.x, h.y, r, r, h.under ? 'opp' : 'shown'); });
+    (p.voids || []).forEach(v => { const xs = v.ring.map(q => q[0]), ys = v.ring.map(q => q[1]);
+      const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      const rx = (Math.max(...xs) - Math.min(...xs)) / 2, ry = (Math.max(...ys) - Math.min(...ys)) / 2;
+      put(cx, cy, rx, ry, 'shown'); put(cx, cy, rx, ry, 'opp'); });
+  });
+  return out;
+}
 let BIG = false;
 function openIsoBig() {
   let ov = $('isoOverlay');
@@ -2115,11 +2237,13 @@ function openIsoBig() {
 function drawIsoBig() {
   const host = $('isoBigHost'); if (!host || !BIG) return;
   const width = Math.min(950, innerWidth - 80), height = Math.min(640, innerHeight - 160);
-  const boxes = [];
+  const boxes = [], drawn = [];
   parts(M).forEach(p => { if (UI.hideDoors && (p.role === 'face' || p.name.startsWith('DOOR'))) return;
+    drawn.push(p);
     (p.boxes || [p.box]).forEach(b => { if (b) boxes.push({ min: b.min, max: b.max,
       hw: p.role === 'slide' ? 'slide' : p.hardware ? (p.name.includes('CASTER') || p.name.includes('GLIDE') ? 'glide' : p.name.includes('ROD') ? 'slide' : 'cam') : undefined }); }); });
-  const cv = isoCanvas(boxes, { w: width, h: height, ss: 2, dark: true, finish: M.finish === 'cherry' ? CHERRY : GREY, yaw: ORBIT.yaw, el: ORBIT.el, zoom: ORBIT.zoom });
+  synthHardware(drawn).forEach(p => (p.boxes || [p.box]).forEach(b => { if (b) boxes.push({ min: b.min, max: b.max, hw: p.hwKind || 'cam' }); }));
+  const cv = isoCanvas(boxes, { w: width, h: height, ss: 2, dark: true, finish: M.finish === 'cherry' ? CHERRY : GREY, yaw: ORBIT.yaw, el: ORBIT.el, zoom: ORBIT.zoom, holes: isoHoles(drawn) });
   cv.style.cssText = 'display:block;width:100%;cursor:grab';
   cv.onmousedown = e => { ORBIT.drag = { x: e.clientX, y: e.clientY, yaw: ORBIT.yaw, el: ORBIT.el }; e.preventDefault(); };
   cv.onwheel = e => { e.preventDefault(); ORBIT.zoom = Math.max(.4, Math.min(3, ORBIT.zoom * (e.deltaY < 0 ? 1.1 : .9))); drawIsoBig(); };
@@ -2128,11 +2252,13 @@ function drawIsoBig() {
 }
 function drawIso() {
   const host = $('iso'), width = Math.max(200, host.clientWidth || 340), height = 250;
-  const boxes = [];
+  const boxes = [], drawn = [];
   parts(M).forEach(p => { if (UI.hideDoors && (p.role === 'face' || p.name.startsWith('DOOR'))) return;
     const hi = (UI.sel.kind === 'part' && UI.sel.id === p.name) || (p.partId && UI.sel.id === p.partId);
-    (p.boxes || [p.box]).forEach(b => { if (b) boxes.push({ min: b.min, max: b.max, hi, hw: p.role === 'slide' ? 'slide' : undefined }); }); });
-  const cv = isoCanvas(boxes, { w: width, h: height, ss: 2, dark: true, finish: M.finish === 'cherry' ? CHERRY : GREY, yaw: ORBIT.yaw, el: ORBIT.el, zoom: ORBIT.zoom });
+    drawn.push(p);
+    (p.boxes || [p.box]).forEach(b => { if (b) boxes.push({ min: b.min, max: b.max, hi, hw: p.role === 'slide' ? 'slide' : p.hardware ? 'cam' : undefined }); }); });
+  synthHardware(drawn).forEach(p => (p.boxes || [p.box]).forEach(b => { if (b) boxes.push({ min: b.min, max: b.max, hw: p.hwKind || 'cam' }); }));
+  const cv = isoCanvas(boxes, { w: width, h: height, ss: 2, dark: true, finish: M.finish === 'cherry' ? CHERRY : GREY, yaw: ORBIT.yaw, el: ORBIT.el, zoom: ORBIT.zoom, holes: isoHoles(drawn) });
   cv.style.width = '100%'; cv.style.height = height + 'px'; cv.style.display = 'block';
   cv.style.border = '1px solid var(--line)'; cv.style.borderRadius = '8px'; cv.style.cursor = 'grab';
   cv.onmousedown = e => { ORBIT.drag = { x: e.clientX, y: e.clientY, yaw: ORBIT.yaw, el: ORBIT.el }; e.preventDefault(); };
@@ -2163,6 +2289,10 @@ function inspector() {
     box.innerHTML = seg('CONTENT', 'segC', b.content, [['open', 'OPEN'], ['door', 'DOOR'], ['doors2', '2 DOORS'], ['drawers', 'DRAWERS']]) +
       (b.content === 'drawers' ? '<div class="grp"><div class="t">DRAWERS</div><div class="row">' +
         F('BOX DRAWERS', 'dBox', b.drawers.box, 1) + F('FILE DRAWERS', 'dFile', b.drawers.file, 1) +
+        (hwModels('slide').length > 1 ? SL('SLIDE MODEL', 'slM', String(b.slideModel != null ? b.slideModel : hwDefault('slide')),
+          hwModels('slide').map((m2, i2) => [String(i2), m2.name + (i2 === hwDefault('slide') ? ' \u00b7 DEFAULT' : '')])) : '') +
+        (hwModels('pull').length > 1 ? SL('HANDLE MODEL', 'plM', String(b.pullModel != null ? b.pullModel : hwDefault('pull')),
+          hwModels('pull').map((m2, i2) => [String(i2), m2.name + (i2 === hwDefault('pull') ? ' \u00b7 DEFAULT' : '')])) : '') +
         '<label class="f">FACE HEIGHTS (mm, bottom up)<input id="dHts" value="' + (b.heights || []).map(v => Math.round(v * MM)).join(', ') + '" placeholder="default"></label>' +
         SL('STACK', 'dAlign', b.align || 'bottom', [['bottom', 'BOTTOM UP'], ['top', 'HUNG FROM TOP']]) + '</div></div>' : '') +
       ((b.content === 'door' || b.content === 'doors2') ?
@@ -2172,6 +2302,13 @@ function inspector() {
         SL('', 'hgT', b.hingeType || 'auto', [['auto', 'AUTO - BY WHAT IT HANGS ON'], ['full', 'FULL OVERLAY (0 MM)'], ['half', 'HALF OVERLAY (9.5 MM)'], ['inset', 'INSET (16 MM)']]) +
         '<div class="row" style="margin-top:8px">' +
         SL('HINGES PER DOOR', 'hgN', b.hinges || 'auto', [['auto', 'AUTO - BY DOOR HEIGHT'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5']]) +
+        (() => { const dd = parts(M).find(q => q.name.startsWith('DOOR') && q.doorFor === (sel.kind === 'case' ? 'CASE' : sel.id));
+          const cat = dd && dd.hingeKind ? (dd.hingeKind.indexOf('HALF') === 0 ? 'hingehalf' : dd.hingeKind.indexOf('INSET') === 0 ? 'hingeinset' : 'hingefull') : 'hingefull';
+          const list = hwModels(cat); if (list.length < 2) return '';
+          return SL('HINGE MODEL', 'hgM', String(b.hingeModel != null ? b.hingeModel : hwDefault(cat)),
+            list.map((m2, i2) => [String(i2), m2.name + (i2 === hwDefault(cat) ? ' \u00b7 DEFAULT' : '')])); })() +
+        (hwModels('pull').length > 1 ? SL('HANDLE MODEL', 'plM', String(b.pullModel != null ? b.pullModel : hwDefault('pull')),
+          hwModels('pull').map((m2, i2) => [String(i2), m2.name + (i2 === hwDefault('pull') ? ' \u00b7 DEFAULT' : '')])) : '') +
         '<label class="f">HINGE END DISTANCE<input id="hgE" type="number" step="0.125" value="' + (b.hingeEnd != null ? b.hingeEnd : '') + '" placeholder="' + ((M.opt.joinery || JOINERY).hinge.end) + '"></label></div>' +
         '<div style="color:var(--mute);font-size:9.5px;margin-top:5px;line-height:1.5">AUTO: HALF OVERLAY ON A DIVIDER, FULL ON A CASE SIDE. INSET DOORS USE THE INSET CRANK.</div></div>' +
         (() => { const dc = b.doorClr || {}, defMM = ((b.doorStyle === 'overlay' || (!b.doorStyle || b.doorStyle === 'auto') && (M.opt.door.style || 'inset') === 'overlay') ? M.opt.door.reveal : M.opt.door.insetClear) * MM;
@@ -2180,6 +2317,8 @@ function inspector() {
             FO('LEFT', 'dgL', dc.l) + FO('RIGHT', 'dgR', dc.r) + FO('TOP', 'dgT2', dc.t) + FO('BOTTOM', 'dgB', dc.b) +
             (b.content === 'doors2' ? FO('BETWEEN THE DOORS', 'dgM', dc.m) : '') + '</div></div>'; })() : '') +
       seg('ADJUSTABLE SHELVES', 'segS', b.shelves, [[0, '—'], [1, '1'], [2, '2'], [3, '3'], [4, '4']]) +
+      (b.shelves && hwModels('peg').length > 1 ? SL('PEG MODEL', 'pgM', String(b.pegModel != null ? b.pegModel : hwDefault('peg')),
+        hwModels('peg').map((m2, i2) => [String(i2), m2.name + (i2 === hwDefault('peg') ? ' \u00b7 DEFAULT' : '')])) : '') +
       '<div class="grp"><div class="t">SPLIT THIS SPACE</div><div class="seg" id="segU">' +
         [['vert', '+ DIVIDER'], ['horiz', '+ SHELF'], ['cross', '+ CROSS']].map(o => '<button data-v="' + o[0] + '">' + o[1] + '</button>').join('') + '</div></div>' +
       '<div class="grp"><div class="t">CLOSET ROD</div>' +
@@ -2193,32 +2332,55 @@ function inspector() {
           FO('ROD DIAMETER', 'rdD', b.rodD, r3(ROD.rodD)) + '</div>' +
           
           '<div style="color:var(--mute);font-size:9.5px;margin-top:5px;line-height:1.5">ONE HOLDER IN EACH FACING PANEL, POCKETED ' + (ST.pocketZ * MM).toFixed(0) + ' MM (' + (ST.shape === 'stadium' ? '69 \u00d7 37 STADIUM, TAIL UP' : '\u00d8 39 ROUND') + '). DRAG THE ROD IN THE DRAWING.</div>'; })() : '') + '</div>' +
-      '<div class="grp"><div class="t">GROMMET</div><div class="row">' + SL('SHAPE', 'groS', b.grommet || 'none', [['none', 'NONE'], ['round', 'ROUND'], ['rect', 'RECTANGLE']]) + '</div>' +
-      (b.grommet ? (() => { const FO = (l, id, v, ph) => '<label class="f">' + l + '<input id="' + id + '" type="number" step="0.0625" value="' + (v == null ? '' : v) + '" placeholder="' + ph + '"></label>';
-        return '<div class="row" style="margin-top:8px">' + (b.grommet === 'round' ? FO('DIAMETER', 'groD', b.grod, '2.375') :
-          FO('WIDTH', 'groW', b.grow, '6') + FO('HEIGHT', 'groH', b.groh, '2') + FO('CORNER RADIUS', 'groR', b.gror, '0.5')) +
-          FO('X FROM LEFT', 'groX', b.grox, 'CENTRE') + FO('Y FROM BACK', 'groY', b.groy, '3') + '</div>'; })() : '') + '</div>';
+      '<div class="grp"><div class="t">GROMMETS \u00b7 CUT THROUGH THE PANEL</div>' +
+      (() => { const list = groList(b), gi = Math.min(UI.groSel || 0, Math.max(0, list.length - 1)), g = list[gi];
+        let out = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' +
+          list.map((q, i2) => '<button class="btn sm' + (i2 === gi ? ' on' : '') + '" data-gsel="' + i2 + '">' + (i2 + 1) + '</button>').join('') +
+          '<button class="btn sm" id="groAdd">+ ADD</button>' + (list.length ? '<button class="btn sm" id="groDel">REMOVE</button>' : '') + '</div>';
+        if (!g) return out + '<div style="color:var(--mute);font-size:9.5px">NONE YET.</div>';
+        const FO = (l, id, v, ph) => '<label class="f">' + l + '<input id="' + id + '" type="number" step="0.0625" value="' + (v == null ? '' : v) + '" placeholder="' + ph + '"></label>';
+        const host = g.host || 'top', shape = g.shape || 'round';
+        out += seg('SHAPE', 'groS', shape, [['round', 'ROUND'], ['square', 'SQUARE'], ['rect', 'RECTANGLE'], ['slot', 'SLOT'], ['oval', 'OVAL']]) +
+          seg('PANEL', 'groP', host, [['top', 'TOP'], ['bottom', 'BOTTOM'], ['left', 'LEFT'], ['right', 'RIGHT'], ['back', 'BACK']]) +
+          '<div class="row" style="margin-top:8px">' +
+          (shape === 'round' ? FO('DIAMETER', 'groD', g.d, '2.375') :
+           shape === 'square' ? FO('SIZE', 'groD', g.d, '3') + FO('CORNER RADIUS', 'groR', g.r, '0.5') :
+           shape === 'rect' ? FO('WIDTH', 'groW', g.w, '6') + FO('HEIGHT', 'groH', g.h, '2') + FO('CORNER RADIUS', 'groR', g.r, '0.5') :
+           FO('WIDTH', 'groW', g.w, shape === 'slot' ? '5' : '4') + FO('HEIGHT', 'groH', g.h, shape === 'slot' ? '1.5' : '2.5')) +
+          (host !== 'left' && host !== 'right' ? FO('X FROM LEFT', 'groX', g.x, 'CENTRE') : '') +
+          (host !== 'back' ? FO('FROM THE BACK', 'groY', g.y, '3') : '') +
+          (host !== 'top' && host !== 'bottom' ? FO('UP FROM THE FLOOR', 'groZ', g.z, 'CENTRE') : '') +
+          '</div><div style="color:var(--mute);font-size:9.5px;margin-top:5px">DRAG IT IN THE DRAWING \u00b7 BOTH AXES. ROUTED THROUGH ON THE POINT-TO-POINT.</div>';
+        return out; })() + '</div>';
     wire('segC', v => { b.content = v; if (v === 'drawers' && !(b.drawers.box + b.drawers.file)) b.drawers.box = 2; });
-    wire('segDS', v => b.doorStyle = v); wire('segHS', v => b.hinge = v); bind('hgT', v => b.hingeType = v);
+    wire('segDS', v => b.doorStyle = v); wire('segHS', v => b.hinge = v); bind('hgT', v => b.hingeType = v); bind('hgM', v => b.hingeModel = +v); bind('plM', v => b.pullModel = +v);
     { const hn = $('hgN'); if (hn) hn.onchange = () => { b.hinges = hn.value; render(); };
       const he = $('hgE'); if (he) he.onchange = () => { b.hingeEnd = he.value.trim() === '' ? null : parseFloat(he.value); render(); }; }
     [['dgL', 'l'], ['dgR', 'r'], ['dgT2', 't'], ['dgB', 'b'], ['dgM', 'm']].forEach(([id, k]) => { const el = $(id); if (!el) return;
       el.onchange = () => { b.doorClr = b.doorClr || {};
         b.doorClr[k] = el.value.trim() === '' ? null : parseFloat(el.value); render(); }; });
-    wire('segS', v => b.shelves = +v);
+    wire('segS', v => b.shelves = +v); bind('pgM', v => b.pegModel = +v);
     wire('segU', v => { const mx = r3((c.x0 + c.x1) / 2), mz = r3((c.z0 + c.z1) / 2 - M.T / 2);
       if (v === 'vert') { const d = addDivider(M, mx, c); UI.sel = { kind: 'divider', id: d.id }; }
       if (v === 'horiz') { const s = addShelf(M, mz, c); UI.sel = { kind: 'shelf', id: s.id }; }
       if (v === 'cross') { const r = addCross(M, mx, mz, c); UI.sel = { kind: 'shelf', id: r.shelf.id }; } });   // shelf first, uprights land on it
     bind('dBox', v => b.drawers.box = Math.max(0, v | 0)); bind('dFile', v => b.drawers.file = Math.max(0, v | 0));
+    bind('slM', v => b.slideModel = +v); bind('plM', v => b.pullModel = +v);
     bind('dAlign', v => b.align = v);
     bind('dHts', v => b.heights = String(v).split(',').map(t => parseFloat(t)).filter(n => !isNaN(n)).map(n => n / MM));
     wire('rdOn', v => b.rod = v === 'on'); wire('rdSt', v => b.rodStyle = v); 
     [['rdB', 'rodBelow'], ['rdY', 'rodY'], ['rdD', 'rodD']].forEach(([id, k]) => { const el = $(id); if (!el) return;
       el.onchange = () => { b[k] = el.value.trim() === '' ? null : parseFloat(el.value); render(); }; });
-    bind('groS', v => b.grommet = v === 'none' ? null : v);
-    [['groD', 'grod'], ['groW', 'grow'], ['groH', 'groh'], ['groR', 'gror'], ['groX', 'grox'], ['groY', 'groy']].forEach(([id, k]) => { const el = $(id); if (!el) return;
-      el.onchange = () => { b[k] = el.value.trim() === '' ? null : parseFloat(el.value); render(); }; });
+    (() => { const list = groList(b), gi = Math.min(UI.groSel || 0, Math.max(0, list.length - 1)), g = list[gi];
+      box.querySelectorAll('[data-gsel]').forEach(el => el.onclick = () => { UI.groSel = +el.dataset.gsel; render(); });
+      const ad = $('groAdd'); if (ad) ad.onclick = () => {
+        const n = list.length; list.push({ shape: 'round', host: 'top', y: 3 + 2 * n, x: null });   // staggered so they never stack
+        UI.groSel = n; render(); };
+      const de = $('groDel'); if (de) de.onclick = () => { list.splice(gi, 1); UI.groSel = 0; render(); };
+      if (!g) return;
+      wire('groS', v => g.shape = v); wire('groP', v => g.host = v);
+      [['groD', 'd'], ['groW', 'w'], ['groH', 'h'], ['groR', 'r'], ['groX', 'x'], ['groY', 'y'], ['groZ', 'z']].forEach(([id, k]) => { const el = $(id); if (!el) return;
+        el.onchange = () => { g[k] = el.value.trim() === '' ? null : parseFloat(el.value); render(); }; }); })();
     return; }
   if (sel.kind === 'shelf' || sel.kind === 'divider') {
     const isSh = sel.kind === 'shelf', it = findPart(sel.kind, sel.id); if (!it) { UI.sel = { kind: 'case' }; return inspector(); }
@@ -2327,11 +2489,18 @@ function drawParts() {
   if (dow) hw['DOWEL 8 x 30 MM'] = dow; if (pins) hw['SHELF PIN 1/4"'] = pins;
   ['A', 'B'].forEach(st => { const n = ps.filter(q => q.name === 'CLOSET ROD HOLDER ' + st).reduce((a2, q) => a2 + q.qty, 0);
     if (n) { hw['CLOSET ROD HOLDER ' + st + ' (' + (ROD.styles[st].pocketZ * MM).toFixed(0) + ' MM POCKET)'] = n; hw['ROD HOLDER SCREW'] = (hw['ROD HOLDER SCREW'] || 0) + n * 2; } });
+  { const fronts = ps.filter(q => q.role === 'face' || q.name.startsWith('DOOR')).reduce((a2, q) => a2 + (q.qty || 1), 0);
+    if (fronts && hwModels('pull').length) { const mn = hwModelName('pull');
+      hw['HANDLE - ' + mn] = (hw['HANDLE - ' + mn] || 0) + fronts; } }
   const rods = ps.filter(q => q.name === 'CLOSET ROD').reduce((a2, q) => a2 + q.qty, 0);
   if (rods) hw['CLOSET ROD \u00d8' + (ROD.rodD * MM).toFixed(0) + ' MM \u00b7 CUT TO LENGTH'] = rods;
   let cupTotal = 0;
   ps.filter(p => p.hingeKind).forEach(p => { const n = p.holes.filter(h => h.type === 'HINGE').length * p.qty; if (!n) return;
-    cupTotal += n; hw['HINGE 35 MM - ' + p.hingeKind] = (hw['HINGE 35 MM - ' + p.hingeKind] || 0) + n; });
+    const catB = p.hingeKind.indexOf('HALF') === 0 ? 'hingehalf' : p.hingeKind.indexOf('INSET') === 0 ? 'hingeinset' : 'hingefull';
+    const bay3 = M.bays[p.doorFor] || {};
+    const mn = hwModelName(catB, bay3.hingeModel);
+    cupTotal += n; const key2 = 'HINGE - ' + p.hingeKind + (mn ? ' - ' + mn : '');
+    hw[key2] = (hw[key2] || 0) + n; });
   if (cupTotal) hw['HINGE MOUNTING PLATE (37 MM LINE)'] = cupTotal;
   const bom = Object.keys(hw).length ? '<div class="grp" style="margin-top:22px"><div class="t">HARDWARE · BILL OF MATERIALS</div><table><thead><tr><th>ITEM</th><th>QTY</th><th>NOTES</th></tr></thead><tbody>' +
     Object.entries(hw).map(([k, v]) => '<tr><td>' + k + '</td><td>' + v + '</td><td>' + (k.includes('SLIDE') ? 'PLACEHOLDER UNTIL THE HARDWARE LIBRARY IS IMPORTED' : 'FROM THE JOINERY') + '</td></tr>').join('') + '</tbody></table></div>' : '';
@@ -2410,14 +2579,14 @@ const EXP = { nest: { case: { sheet: '48,96', gap: 0.5, margin: 0.25, grain: 'ma
                       box:  { sheet: '48,96', gap: 0.25, margin: 0.25, grain: 'any' },
                       slot: { sheet: '48,96', gap: 0.25, margin: 0.25, grain: 'any' } },
               drill: { maxBore: 0.5, faceCam: 'T4', faceDowel: 'T10', edge: 'T9' },
-              three: { format: 'dae', units: 'in', faces: true },
+              three: { format: 'dae', units: 'in', faces: true, hw: true, finish: false },
               assy: { spare: 0, dims: false } };
 function download(name, data, type) {                                          // straight to the browser's download folder
   const blob = data instanceof Blob ? data : new Blob([data], { type: type || 'text/plain' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.21'.slice(0, 10);
+const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.32'.slice(0, 10);
 
 function openFlyout(which) {
   UI.fly = which;
@@ -2501,14 +2670,19 @@ function openFlyout(which) {
     body.innerHTML = '<div class="grp">' + opt('FORMAT', 't3Fmt', EXP.three.format, [['stl', 'STL (BINARY)'], ['obj', 'OBJ (NAMED PARTS)'], ['dae', 'COLLADA .DAE (SKETCHUP)']]) + '</div>' +
       '<div class="grp">' + opt('UNITS', 't3Units', EXP.three.units, [['in', 'INCHES'], ['mm', 'MILLIMETRES']]) + '</div>' +
       '<div class="grp">' + opt('DRAWER FACES AND DOORS', 't3Faces', EXP.three.faces ? '1' : '0', [['1', 'INCLUDE'], ['0', 'LEAVE OFF (SEE INSIDE)']]) + '</div>' +
+      '<div class="grp">' + opt('HARDWARE', 't3Hw', EXP.three.hw !== false ? '1' : '0', [['1', 'SHOW ALL HARDWARE'], ['0', 'LEAVE OFF']]) + '</div>' +
+      '<div class="grp">' + opt('FINISHES', 't3Fin', EXP.three.finish ? '1' : '0', [['0', 'RAW'], ['1', 'CASE FINISH COLOUR']]) + '</div>' +
       '<div class="grp"><div class="t">WHAT GOES OUT</div><div style="font-size:10px;color:var(--mute);line-height:1.6">Every panel and drawer part as a solid, named. Slides go out as placeholder solids until the hardware library is imported.</div></div>';
     foot.innerHTML = '<button class="btn on" id="fyGo">EXPORT ' + EXP.three.format.toUpperCase() + '</button>';
     $('t3Fmt').onchange = () => { $('fyGo').textContent = 'EXPORT ' + $('t3Fmt').value.toUpperCase(); };
-    $('fyGo').onclick = () => { EXP.three = { format: $('t3Fmt').value, units: $('t3Units').value, faces: $('t3Faces').value === '1' };
-      const k = EXP.three.units === 'mm' ? MM : 1, ps = parts(M).filter(p => EXP.three.faces || !(p.role === 'face' || p.name.startsWith('DOOR')));
+    $('fyGo').onclick = () => { EXP.three = { format: $('t3Fmt').value, units: $('t3Units').value, faces: $('t3Faces').value === '1',
+        hw: $('t3Hw').value === '1', finish: $('t3Fin').value === '1' };
+      const k = EXP.three.units === 'mm' ? MM : 1;
+      let ps = parts(M).filter(p => EXP.three.faces || !(p.role === 'face' || p.name.startsWith('DOOR')));
+      if (!EXP.three.hw) ps = ps.filter(p => !p.hardware && p.role !== 'slide');
       if (EXP.three.format === 'stl') download(stamp() + '.stl', stlBinary(ps, k), 'model/stl');
       else if (EXP.three.format === 'obj') download(stamp() + '.obj', objText(ps, k), 'text/plain');
-      else download(stamp() + '.dae', daeText(ps, k, EXP.three.units), 'model/vnd.collada+xml'); };
+      else download(stamp() + '.dae', daeText(ps, k, EXP.three.units, { hw: EXP.three.hw, finish: EXP.three.finish ? (M.finish === 'cherry' ? 'cherry' : 'grey') : false }), 'model/vnd.collada+xml'); };
   }
   F.classList.add('open');
 }
@@ -2707,12 +2881,12 @@ async function buildInstructions() {
   const allB = numbered.flatMap(boxesOf); const caseW = Math.max(...allB.map(bb => bb.max[0]), 1);
   const flatBox = bb => ({ ...bb, min: [bb.min[2], bb.min[1], caseW - bb.max[0]], max: [bb.max[2], bb.max[1], caseW - bb.min[0]] });
   const lift = Math.max(2, M.H * 0.08);
-  const dstr = '2026-09-03.21'.slice(0, 10);
+  const dstr = '2026-09-03.32'.slice(0, 10);
   const stepsPerPage = 6; const totalPages = 1 + Math.ceil(plan.length / stepsPerPage);
   const header = pg => { pdf.page(); const lh = 34, lw = lh * logo.width / logo.height; pdf.image(logo, MG, MG, lw, lh);
     pdf.text(PW - MG, MG + 12, 'Assembly Instructions', 13, true, 'right'); pdf.text(PW - MG, MG + 30, 'MODEL NO.: ' + modelNo, 15, true, 'right');
     pdf.line(MG, MG + 44, PW - MG, MG + 44, 1.4); pdf.text(PW / 2, MG + 64, title, 18, true, 'center'); pdf.text(PW - MG, MG + 64, dstr, 8, false, 'right');
-    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.21', 7, false, 'right', 0.4); return MG + 76; };
+    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.32', 7, false, 'right', 0.4); return MG + 76; };
   let y = header(1);
   const cw = CW / hw.length, rowH = 78; pdf.rect(MG, y, CW, rowH, { lw: 0.9 });
   hw.forEach((r, i) => { const x = MG + i * cw; if (i) pdf.line(x, y, x, y + rowH, 0.9); pdf.rect(x, y, cw, 14, { fill: 0.9 }); pdf.text(x + cw / 2, y + 10, r.code, 8, true, 'center');
@@ -2792,7 +2966,7 @@ function ncFor(p) {
   const J = M.opt.joinery || JOINERY, maxB = EXP.drill.maxBore;
   const r = cnc1Program(P), code = Array.isArray(r.code) ? r.code.join('\n') : String(r.code || '');
   const head = [];
-  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.21 - ' + p.name + ' x' + p.qty);
+  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.32 - ' + p.name + ' x' + p.qty);
   head.push(';STOCK ' + p.t + '" - HOLE CENTERLINE ' + r3(P._ctr) + '" FROM THE CAM FACE');
   head.push(';PANEL LIES CAM FACE ' + (P._faceDown ? 'DOWN' : 'UP') + ': Z DEPTH OVERRIDE ' + P.zOverride + '" OFF THE TABLE');
   head.push(';LOAD TURNED 90 LEFT FROM THE DRAWING: ' + r3(p.w) + '" LONG SIDE RUNS DOWN Y (VACUUM ZONE), ' + r3(p.h) + '" ACROSS X');
@@ -2881,22 +3055,278 @@ function objText(ps, k) { const out = ['# CASEMAKER 2 ' + stamp()]; let n = 0;
     out.push('o ' + p.name.replace(/\s+/g, '_') + '_' + pi);                   // one object per part, boxes inside
     bs.forEach(b2 => boxTris(b2, k).forEach(t => { t.forEach(v => out.push('v ' + v.map(x => x.toFixed(4)).join(' '))); out.push('f ' + (n + 1) + ' ' + (n + 2) + ' ' + (n + 3)); n += 3; })); });
   return out.join('\n') + '\n'; }
-function daeText(ps, k, units) { const geos = [], nodes = [];
-  const esc = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-  ps.forEach((p, pi) => {
-    const bs = (p.boxes || [p.box]).filter(Boolean); if (!bs.length) return;
-    const base = (p.name.replace(/[^A-Za-z0-9]/g, '_') + '_' + pi);
-    const inner = [];
-    bs.forEach((b2, i) => { const id = base + (bs.length > 1 ? '_' + (i + 1) : ''), tris = boxTris(b2, k);
-      const pos = tris.flatMap(t => t.flatMap(v => v)), idx = tris.flatMap((t, j) => [j * 3, j * 3 + 1, j * 3 + 2]);
-      geos.push('<geometry id="g_' + id + '" name="' + esc(p.name) + '"><mesh><source id="p_' + id + '"><float_array id="a_' + id + '" count="' + pos.length + '">' + pos.map(x => x.toFixed(4)).join(' ') + '</float_array>' +
-        '<technique_common><accessor source="#a_' + id + '" count="' + (pos.length / 3) + '" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common></source>' +
-        '<vertices id="v_' + id + '"><input semantic="POSITION" source="#p_' + id + '"/></vertices><triangles count="' + tris.length + '"><input semantic="VERTEX" source="#v_' + id + '" offset="0"/><p>' + idx.join(' ') + '</p></triangles></mesh></geometry>');
-      inner.push('<instance_geometry url="#g_' + id + '"/>'); });
-    nodes.push('<node id="n_' + base + '" name="' + esc(p.name) + '">' + inner.join('') + '</node>');   // one group per part
+/* v1's proven COLLADA writer, ported: local meshes with the bores really subtracted,
+   placed by node transforms so SketchUp keeps every part as its own component. */
+function daePanelMesh(p){                              // local slab [0..w]x[0..d]x[0..t] minus every bore
+  const w=p.w,d=(p.d!=null?p.d:p.h),t=p.t,N=20,pos=[],tris=[];
+  const push=q=>{ pos.push(q[0],q[1],q[2]); return pos.length/3-1; };
+  const addTri=(A,B,C,out)=>{ const u=[B[0]-A[0],B[1]-A[1],B[2]-A[2]],v=[C[0]-A[0],C[1]-A[1],C[2]-A[2]];
+    const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+    if(n[0]*out[0]+n[1]*out[1]+n[2]*out[2]<0){ const s=B; B=C; C=s; }
+    tris.push(push(A),push(B),push(C)); };
+  const faces={ top:{A:w,B:d,out:[0,0,1], M:(x,y)=>[x,y,t]},   bot:{A:w,B:d,out:[0,0,-1],M:(x,y)=>[x,y,0]},
+    front:{A:w,B:t,out:[0,-1,0],M:(x,y)=>[x,0,y]},  back:{A:w,B:t,out:[0,1,0], M:(x,y)=>[x,d,y]},
+    left:{A:d,B:t,out:[-1,0,0],M:(x,y)=>[0,x,y]},   right:{A:d,B:t,out:[1,0,0],M:(x,y)=>[w,x,y]} };
+  const fh={top:[],bot:[],front:[],back:[],left:[],right:[]}, tol=0.02;
+  (p.holes||[]).forEach(h=>{ const r=h.d/2, dep=Math.min(h.z||t/2,t);
+    if(!h.edge){ const thru=dep>=t-0.01;
+      if(thru){ const tag={c:[h.x,h.y],r,dep:t,thru:1}; fh.top.push(tag); fh.bot.push({c:[h.x,h.y],r,dep:t,thru:2}); }
+      else fh[h.under?'bot':'top'].push({c:[h.x,h.y],r,dep}); return; }
+    const zc=t-(h.zo!==undefined?h.zo:t/2);
+    if(h.y<=tol) fh.front.push({c:[h.x,zc],r,dep}); else if(h.y>=d-tol) fh.back.push({c:[h.x,zc],r,dep});
+    else if(h.x<=tol) fh.left.push({c:[h.y,zc],r,dep}); else if(h.x>=w-tol) fh.right.push({c:[h.y,zc],r,dep}); });
+  (p.voids||[]).forEach(v=>{ const cx=v.ring.reduce((a2,q)=>a2+q[0],0)/v.ring.length, cy=v.ring.reduce((a2,q)=>a2+q[1],0)/v.ring.length;
+    const rr=Math.max(...v.ring.map(q=>Math.hypot(q[0]-cx,q[1]-cy)));
+    fh.top.push({c:[cx,cy],r:rr,ring:v.ring,dep:t,thru:1}); fh.bot.push({c:[cx,cy],r:rr,ring:v.ring,dep:t,thru:2}); });
+  for(const k in faces){ const F=faces[k], hl=fh[k].filter(h=>h.c[0]>h.r&&h.c[0]<F.A-h.r&&h.c[1]>h.r&&h.c[1]<F.B-h.r);
+    /* each bore sits in a square collar; the collar meshes to the ring, and the rest of the face is a plain grid */
+    let cells=hl.map(h=>{ let e=h.r*1.06; return {h,x0:h.c[0]-e,x1:h.c[0]+e,y0:h.c[1]-e,y1:h.c[1]+e}; });
+    for(let pass=0;pass<3;pass++){ let shrunk=false;                          // collars must not touch each other or the face edge
+      for(let i=0;i<cells.length;i++) for(let q=i+1;q<cells.length;q++){ const A=cells[i],B=cells[q];
+        if(A.x0<B.x1&&B.x0<A.x1&&A.y0<B.y1&&B.y0<A.y1){ [A,B].forEach(C=>{ const e=(C.x1-C.x0)/2*0.9, r=C.h.r*1.005, ee=Math.max(e,r);
+          C.x0=C.h.c[0]-ee;C.x1=C.h.c[0]+ee;C.y0=C.h.c[1]-ee;C.y1=C.h.c[1]+ee; }); shrunk=true; } }
+      cells.forEach(C=>{ C.x0=Math.max(C.x0,0);C.x1=Math.min(C.x1,F.A);C.y0=Math.max(C.y0,0);C.y1=Math.min(C.y1,F.B); });
+      if(!shrunk) break; }
+    if(!hl.length){ addTri(F.M(0,0),F.M(F.A,0),F.M(F.A,F.B),F.out); addTri(F.M(0,0),F.M(F.A,F.B),F.M(0,F.B),F.out); }
+    else{
+      cells.forEach(C=>{ const h=C.h;
+        /* radial collar: each ring vertex projects straight out to the cell boundary, corners inserted
+           where the projection walks past them - a clean annulus, so the opening is a true circle */
+        const ring=[],proj=[],edge=[];
+        const NP = h.ring ? h.ring.length : N;
+        for(let i=0;i<NP;i++){ let px2,py2;
+          if(h.ring){ px2=h.ring[i][0]; py2=h.ring[i][1]; } else { const a=i/N*2*Math.PI; px2=h.c[0]+h.r*Math.cos(a); py2=h.c[1]+h.r*Math.sin(a); }
+          const dl=Math.hypot(px2-h.c[0],py2-h.c[1])||1, dx=(px2-h.c[0])/dl, dy=(py2-h.c[1])/dl;
+          ring.push([px2,py2]);
+          const tx=dx>1e-12?(C.x1-h.c[0])/dx:dx<-1e-12?(C.x0-h.c[0])/dx:Infinity;
+          const ty=dy>1e-12?(C.y1-h.c[1])/dy:dy<-1e-12?(C.y0-h.c[1])/dy:Infinity;
+          const t=Math.min(tx,ty);
+          proj.push([h.c[0]+t*dx, h.c[1]+t*dy]); edge.push(tx<ty?(dx>0?'R':'L'):(dy>0?'T':'B')); }
+        const order=['R','T','L','B'];                                       // CCW; the corner passed when leaving each edge
+        const cornerAfter={R:[C.x1,C.y1],T:[C.x0,C.y1],L:[C.x0,C.y0],B:[C.x1,C.y0]};
+        const NP2 = ring.length;
+        for(let i=0;i<NP2;i++){ const j=(i+1)%NP2, outs=[proj[i]];
+          let e0=order.indexOf(edge[i]), guard=0;                              // insert every corner walked past
+          while(order[e0]!==edge[j]&&guard++<4){ outs.push(cornerAfter[order[e0]]); e0=(e0+1)%4; }
+          outs.push(proj[j]);
+          for(let k=0;k<outs.length-1;k++){ addTri(F.M(...ring[i]),F.M(...outs[k]),F.M(...outs[k+1]),F.out); }
+          addTri(F.M(...ring[i]),F.M(...outs[outs.length-1]),F.M(...ring[j]),F.out); } });
+      const xs=[...new Set([0,F.A].concat(cells.flatMap(C=>[C.x0,C.x1])).map(v=>+v.toFixed(6)))].sort((a,b)=>a-b);
+      const ys=[...new Set([0,F.B].concat(cells.flatMap(C=>[C.y0,C.y1])).map(v=>+v.toFixed(6)))].sort((a,b)=>a-b);
+      for(let i=0;i<xs.length-1;i++) for(let q=0;q<ys.length-1;q++){ const cx=(xs[i]+xs[i+1])/2, cy=(ys[q]+ys[q+1])/2;
+        if(cells.some(C=>cx>C.x0&&cx<C.x1&&cy>C.y0&&cy<C.y1)) continue;
+        addTri(F.M(xs[i],ys[q]),F.M(xs[i+1],ys[q]),F.M(xs[i+1],ys[q+1]),F.out);
+        addTri(F.M(xs[i],ys[q]),F.M(xs[i+1],ys[q+1]),F.M(xs[i],ys[q+1]),F.out); } }
+    const m=F.out.map(v=>-v);                          // the bore runs inward
+    hl.forEach(h=>{ if(h.thru===2) return;             // a through hole's wall is built once, from the entry side
+      const C=F.M(h.c[0],h.c[1]);
+      const NP3 = h.ring ? h.ring.length : N;
+      const ring=[],ring2=[];
+      for(let i=0;i<NP3;i++){ const q = h.ring ? F.M(h.ring[i][0],h.ring[i][1]) : F.M(h.c[0]+h.r*Math.cos(i/N*2*Math.PI),h.c[1]+h.r*Math.sin(i/N*2*Math.PI));
+        ring.push(q); ring2.push([q[0]+m[0]*h.dep,q[1]+m[1]*h.dep,q[2]+m[2]*h.dep]); }
+      const CB=[C[0]+m[0]*h.dep,C[1]+m[1]*h.dep,C[2]+m[2]*h.dep];
+      for(let i=0;i<NP3;i++){ const j=(i+1)%NP3, ax=[(ring[i][0]+ring[j][0])/2-C[0],(ring[i][1]+ring[j][1])/2-C[1],(ring[i][2]+ring[j][2])/2-C[2]];
+        const inw=ax.map(v=>-v);                       // wall shows its inside
+        addTri(ring[i],ring[j],ring2[j],inw); addTri(ring[i],ring2[j],ring2[i],inw); }
+      if(!h.thru) for(let i=0;i<NP3;i++){ const j=(i+1)%NP3; addTri(CB,ring2[i],ring2[j],F.out); } }); }
+  return {pos,tris};
+}
+function smoothNormals(pos,tri,creaseDeg){                                  // split vertices by crease angle so SketchUp softens curves only
+  const nv=pos.length/3, cosC=Math.cos((creaseDeg||40)*Math.PI/180);
+  const fn=[], adj=Array.from({length:nv},()=>[]);
+  for(let t=0;t<tri.length;t+=3){
+    const a=tri[t]*3,b=tri[t+1]*3,c=tri[t+2]*3;
+    const ux=pos[b]-pos[a],uy=pos[b+1]-pos[a+1],uz=pos[b+2]-pos[a+2];
+    const vx=pos[c]-pos[a],vy=pos[c+1]-pos[a+1],vz=pos[c+2]-pos[a+2];
+    let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+    const L=Math.hypot(nx,ny,nz)||1; nx/=L; ny/=L; nz/=L;
+    const f=t/3; fn.push([nx,ny,nz]);
+    adj[tri[t]].push(f); adj[tri[t+1]].push(f); adj[tri[t+2]].push(f); }
+  const outP=[], outN=[], outT=[], key=new Map();
+  for(let t=0;t<tri.length;t+=3){ const f=t/3, F=fn[f];
+    for(let k=0;k<3;k++){ const vi=tri[t+k];
+      let ax=0,ay=0,az=0;                                                     // average only the faces within the crease angle
+      adj[vi].forEach(g=>{ const G=fn[g]; if(G[0]*F[0]+G[1]*F[1]+G[2]*F[2]>=cosC){ ax+=G[0]; ay+=G[1]; az+=G[2]; } });
+      const L=Math.hypot(ax,ay,az)||1; ax/=L; ay/=L; az/=L;
+      const kk=vi+'|'+Math.round(ax*100)+'|'+Math.round(ay*100)+'|'+Math.round(az*100);
+      let idx=key.get(kk);
+      if(idx===undefined){ idx=outP.length/3; key.set(kk,idx);
+        outP.push(pos[vi*3],pos[vi*3+1],pos[vi*3+2]); outN.push(+ax.toFixed(4),+ay.toFixed(4),+az.toFixed(4)); }
+      outT.push(idx); } }
+  return {pos:outP,nrm:outN,tri:outT};
+}
+/* ---- THE HARDWARE LIBRARY ----
+   Origin rule, same for every piece and for the STEP / DWG / PDF drawings when they land:
+   the origin is the CENTRE OF THE MAIN BORE on the face the piece mounts against;
+   +Z runs into the panel along the bore, +X toward the piece's second hole. Edge-mounted
+   pieces measure the same way off the edge bore. Install = drop the origin on the hole. */
+/* Categories hold models. The job keeps its own model list and per-category default;
+   any place hardware is applied can pick a different model than the default. */
+const HWCAT = [
+  { id: 'hingefull', name: 'FULL OVERLAY HINGES (0 MM CRANK)', on: 'HINGE CUP \u00d835', seed: 'STANDARD 35 MM CLIP-ON \u00b7 FULL' },
+  { id: 'hingehalf', name: 'HALF OVERLAY HINGES (9.5 MM CRANK)', on: 'HINGE CUP \u00d835', seed: 'STANDARD 35 MM CLIP-ON \u00b7 HALF' },
+  { id: 'hingeinset', name: 'INSET HINGES (16 MM CRANK)', on: 'HINGE CUP \u00d835', seed: 'STANDARD 35 MM CLIP-ON \u00b7 INSET' },
+  { id: 'peg', name: 'SHELF PEGS', on: 'SHELF PIN BORE \u00d85', seed: '5 MM STEEL PEG' },
+  { id: 'glide', name: 'FLOOR GLIDES', on: 'GLIDE BORE', seed: 'LEVELLING GLIDE M8' },
+  { id: 'slide', name: 'DRAWER SLIDES', on: 'SLIDE SCREWS', seed: 'SIDE-MOUNT BALL BEARING', seed2: 'MCMASTER FULL-EXT BALL BEARING', seed2mcm: '11435A13' },
+  { id: 'camnut', name: 'CAM NUTS', on: 'CAM BORE (FACE)', seed: 'CAM NUT \u00d820' },
+  { id: 'campin', name: 'CAM SCREWS', on: 'PIN BORE (EDGE)', seed: 'CAM SCREW \u00d87' },
+  { id: 'dowel', name: 'DOWELS', on: 'DOWEL BORE (EDGE)', seed: 'DOWEL 8 \u00d7 30 FLUTED' },
+  { id: 'insert', name: 'THREADED INSERTS', on: 'INSERT BORE', seed: null },
+  { id: 'pull', name: 'HANDLES \u00b7 DOORS AND DRAWERS', on: 'PULL BORES', seed: 'WIRE PULL 128 MM CC' },
+  { id: 'rodhold', name: 'CLOSET ROD HOLDERS', on: 'ROUTED POCKET', seed: 'STYLE A \u00b7 STADIUM', seed2: 'STYLE B \u00b7 ROUND CUP' },
+  { id: 'rod', name: 'CLOSET RODS', on: 'THE HOLDERS', seed: 'ROD \u00d825 \u00b7 CUT TO LENGTH' }
+];
+function hwModels(cat) {                                                       // the job's model list, seeded once
+  M.hwModels = M.hwModels || {};
+  if (!M.hwModels[cat]) { const c = HWCAT.find(q => q.id === cat);
+    M.hwModels[cat] = []; if (c && c.seed) M.hwModels[cat].push({ name: c.seed, mcm: '' });
+    if (c && c.seed2) M.hwModels[cat].push({ name: c.seed2, mcm: c.seed2mcm || '' }); }
+  return M.hwModels[cat];
+}
+function hwDefault(cat) { M.hwDefault = M.hwDefault || {}; return Math.min(M.hwDefault[cat] || 0, Math.max(0, hwModels(cat).length - 1)); }
+function hwModelName(cat, idx) { const l = hwModels(cat), i = idx != null ? idx : hwDefault(cat); return l[i] ? l[i].name : ''; }
+const HWLIB = [
+  { id: 'insert', name: 'THREADED INSERT', on: 'INSERT BORE', note: 'WAITING ON THE LIBRARY DRAWINGS' },
+  { id: 'peg', name: 'SHELF PEG', on: 'SHELF PIN BORE \u00d85', note: 'SET UNDER EACH ADJUSTABLE SHELF' },
+  { id: 'pull', name: 'DRAWER PULL', on: 'PULL BORES', note: 'WAITING ON THE LIBRARY DRAWINGS' },
+  { id: 'glide', name: 'FLOOR GLIDE', on: 'GLIDE BORE', note: 'SIDE BOTTOM EDGES OR UNDER THE BOTTOM' },
+  { id: 'hingefull', name: 'FULL OVERLAY HINGE (0 MM CRANK)', on: 'HINGE CUP \u00d835', note: 'DOOR HANGS ON AN OUTSIDE EDGE' },
+  { id: 'hingehalf', name: 'HALF OVERLAY HINGE (9.5 MM CRANK)', on: 'HINGE CUP \u00d835', note: 'ON A DIVIDER, OR BACK TO BACK WITH ANOTHER DOOR' },
+  { id: 'hingeinset', name: 'INSET HINGE (16 MM CRANK)', on: 'HINGE CUP \u00d835', note: 'THE DEFAULT ON INSET DOORS' },
+  { id: 'camnut', name: 'CAM NUT \u00d820', on: 'CAM BORE (FACE)', note: 'FLUSH IN THE BORE' },
+  { id: 'campin', name: 'CAM SCREW', on: 'PIN BORE (EDGE)', note: 'CONCEALED IN THE JOINT' },
+  { id: 'dowel', name: 'DOWEL 8 \u00d7 30', on: 'DOWEL BORE (EDGE)', note: 'CONCEALED IN THE JOINT' },
+  { id: 'slide', name: 'DRAWER SLIDE', on: 'SLIDE SCREWS', note: 'MODELLED PER DRAWER' },
+  { id: 'rodhold', name: 'CLOSET ROD HOLDER', on: 'ROUTED POCKET', note: 'STYLE A OR B, MEASURED OFF THE STL' },
+  { id: 'rod', name: 'CLOSET ROD \u00d825', on: 'THE HOLDERS', note: 'CUT TO LENGTH' }
+];
+function hwModelUse() {                                                       // model index → cup/piece count, per category
+  const use = {}; const add = (c, i2, n2) => { (use[c] = use[c] || {})[i2] = (use[c][i2] || 0) + n2; };
+  parts(M).forEach(p => { if (p.hingeKind && p.name.startsWith('DOOR')) {
+      const cat = p.hingeKind.indexOf('HALF') === 0 ? 'hingehalf' : p.hingeKind.indexOf('INSET') === 0 ? 'hingeinset' : 'hingefull';
+      const bay2 = M.bays[p.doorFor] || {};
+      add(cat, bay2.hingeModel != null ? bay2.hingeModel : hwDefault(cat), p.holes.filter(h => h.type === 'HINGE').length); } });
+  spaces(M).forEach(c => { const b2 = bayOf(M, c.key);
+    if (b2.shelves) add('peg', b2.pegModel != null ? b2.pegModel : hwDefault('peg'), 4 * b2.shelves);
+    if (b2.content === 'drawers') { const nD = (b2.drawers.box + b2.drawers.file) || 0;
+      add('slide', b2.slideModel != null ? b2.slideModel : hwDefault('slide'), nD);
+      add('pull', b2.pullModel != null ? b2.pullModel : hwDefault('pull'), nD); }
+    if (b2.content === 'door' || b2.content === 'doors2') add('pull', b2.pullModel != null ? b2.pullModel : hwDefault('pull'), b2.content === 'doors2' ? 2 : 1);
+    if (b2.rod) add('rodhold', b2.rodStyle === 'B' ? 1 : 0, 2); });
+  const g = parts(M).reduce((a2, p) => a2 + (p.holes || []).filter(h => h.type === 'GLIDE').length, 0);
+  if (g) add('glide', M.glideModel != null ? M.glideModel : hwDefault('glide'), g);
+  return use;
+}
+function hwCounts(ps) {                                                        // what this case actually uses
+  const n = { insert: 0, peg: 0, pull: 0, glide: 0, hingefull: 0, hingehalf: 0, hingeinset: 0, camnut: 0, campin: 0, dowel: 0, slide: 0, rodhold: 0, rod: 0 };
+  ps.forEach(p => { (p.holes || []).forEach(h => {
+      if (h.type === 'GLIDE') n.glide++;
+      else if (h.type === 'HINGE') { const k = (p.hingeKind || '');
+        if (k.indexOf('HALF') === 0) n.hingehalf++; else if (k.indexOf('INSET') === 0) n.hingeinset++; else n.hingefull++; }
+      else if (h.type === 'CAM') n.camnut++;
+      else if (h.type === 'PIN' && h.edge) n.campin++;
+      else if (h.type === 'DOWEL' && h.edge) n.dowel++; });
+    if (p.role === 'slide') n.slide += p.qty || 1;
+    if (p.name === 'CLOSET ROD') n.rod += p.qty || 1;
+    if (p.name.startsWith('CLOSET ROD HOLDER')) n.rodhold += p.qty || 1; });
+  n.peg = ps.filter(p => p.name === 'ADJ SHELF').reduce((a, p) => a + 4 * (p.qty || 1), 0);
+  n.pull = ps.filter(p => p.role === 'face' || p.name.startsWith('DOOR')).reduce((a, p) => a + (p.qty || 1), 0);
+  return n;
+}
+function synthHardware(ps) {                                                   // library pieces set on their bores
+  const out = [];
+  const boxAt = (C, ex, ey, n, sx, sy, sIn, sOut) => {                         // a solid on the origin frame
+    const lo = [0, 1, 2].map(i => C[i] - Math.abs(ex[i]) * sx / 2 - Math.abs(ey[i]) * sy / 2 + Math.min(n[i] * sOut, -n[i] * sIn));
+    const hi = [0, 1, 2].map(i => C[i] + Math.abs(ex[i]) * sx / 2 + Math.abs(ey[i]) * sy / 2 + Math.max(n[i] * sOut, -n[i] * sIn));
+    return { min: [0, 1, 2].map(i => Math.min(lo[i], hi[i])), max: [0, 1, 2].map(i => Math.max(lo[i], hi[i])) }; };
+  /* shelf pegs: four under each adjustable shelf, on the nearest pin bores */
+  const shelves = ps.filter(p => p.name === 'ADJ SHELF');
+  shelves.forEach(sh => { const zc = sh.box.min[2];
+    ps.forEach(p => { if (!p.frame || !(p.name.endsWith('SIDE') || p.name.startsWith('DIVIDER'))) return;
+      if (p.box.max[0] < sh.box.min[0] - 0.1 || p.box.min[0] > sh.box.max[0] + 0.1) return;
+      const pins = (p.holes || []).filter(h => h.type === 'SHELFPIN' && !h.edge);
+      if (!pins.length) return;
+      const f = p.frame, n0 = [0, 0, 0]; n0[f.ax] = Math.sign(f.shown - f.opp) || 1;
+      const rows = {};                                                          // nearest bore per depth row
+      pins.forEach(h => { const wz = toWorld(p, h.x, h.y, 'shown')[2];
+        const key = Math.round(h.y * 4);
+        if (!rows[key] || Math.abs(wz - zc) < Math.abs(rows[key].wz - zc)) rows[key] = { h, wz }; });
+      Object.values(rows).forEach(({ h, wz }) => { if (Math.abs(wz - zc) > 1.5) return;
+        const C = toWorld(p, h.x, h.y, h.under ? 'opp' : 'shown');
+        const n = h.under ? n0.map(v => -v) : n0;
+        out.push({ name: 'SHELF PEG', hardware: true, qty: 1, w: 0.2, h: 0.2, t: 0.55, hwKind: 'pin',
+          box: boxAt(C, f.ux, f.uy, n, 0.2, 0.2, 0.3, 0.31) }); }); }); });
+  ps.forEach(p => { if (!p.frame) return; const f = p.frame;
+    const n0 = [0, 0, 0]; n0[f.ax] = Math.sign(f.shown - f.opp) || 1;
+    (p.holes || []).forEach(h => {
+      if (h.type === 'GLIDE' && h.edge) {                                       // a puck under the side's bottom edge
+        const C = edgeHoleWorld(p, h);
+        out.push({ name: 'FLOOR GLIDE', hardware: true, qty: 1, w: 0.9, h: 0.9, t: 0.35, hwKind: 'glide',
+          box: { min: [C[0] - 0.45, C[1] - 0.45, C[2] - 0.35], max: [C[0] + 0.45, C[1] + 0.45, C[2]] } }); return; }
+      if (h.type === 'GLIDE' && !h.edge) {                                      // bolted under the bottom
+        const C = toWorld(p, h.x, h.y, 'opp');
+        out.push({ name: 'FLOOR GLIDE', hardware: true, qty: 1, w: 0.9, h: 0.9, t: 0.9, hwKind: 'glide',
+          box: { min: [C[0] - 0.45, C[1] - 0.45, C[2] - 0.9], max: [C[0] + 0.45, C[1] + 0.45, C[2]] } }); return; }
+      if (h.type === 'HINGE' && p.name.startsWith('DOOR')) {                    // cup + arm
+        const inFace = h.under ? 'opp' : 'shown';
+        const n = h.under ? n0.map(v => -v) : n0;
+        const C = toWorld(p, h.x, h.y, inFace);
+        const dirE = (p.hingeEdge === 'L' ? -1 : 1), ex = f.ux.map(v => v * dirE);
+        out.push({ name: 'HINGE \u00b7 ' + ((p.hingeKind || 'FULL OVERLAY').split(' (')[0]), hardware: true, qty: 1, w: 2.3, h: 0.75, t: 0.55, hwKind: 'hinge',
+          boxes: [boxAt(C, f.ux, f.uy, n, h.d, h.d, 0.5, 0.06),
+                  boxAt([0, 1, 2].map(i => C[i] + ex[i] * (1.15 - h.d / 2)), ex, f.uy, n, 2.3, 0.75, 0, 0.16)] }); return; }
+      if (h.type === 'CAM' && !h.edge) {                                        // the nut, flush in its bore
+        const C = toWorld(p, h.x, h.y, h.under ? 'opp' : 'shown');
+        const n = h.under ? n0.map(v => -v) : n0;
+        out.push({ name: 'CAM NUT', hardware: true, qty: 1, w: h.d, h: h.d, t: 0.45, hwKind: 'cam',
+          box: boxAt(C, f.ux, f.uy, n, h.d * 0.96, h.d * 0.96, 0.44, 0.01) }); return; }
+    }); });
+  return out;
+}
+function daeText(ps, k, units, o3) { o3 = o3 || {};
+  if (o3.hw === false) ps = ps.filter(p => !p.hardware && p.role !== 'slide');
+  else if (o3.hw) ps = ps.concat(synthHardware(ps));
+  const geos = [], libs = [], nodes = []; let gi = 0;
+  const S = k;                                                                 // unit scale on every coordinate
+  ps.forEach(p => {
+    const boxes = (p.boxes || (p.box && p.box.min ? [p.box] : [])).filter(Boolean); if (!boxes.length) return;
+    const mesh = daePanelMesh(p), id = 'g' + (gi++);
+    const sm = smoothNormals(mesh.pos.map(v => v * S), mesh.tris, 40), P = [];
+    for (let i = 0; i < sm.tri.length; i++) P.push(sm.tri[i], sm.tri[i]);
+    geos.push(`<geometry id="${id}"><mesh><source id="${id}p"><float_array id="${id}a" count="${sm.pos.length}">${sm.pos.map(v=>+v.toFixed(5)).join(' ')}</float_array><technique_common><accessor source="#${id}a" count="${sm.pos.length/3}" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common></source><source id="${id}n"><float_array id="${id}na" count="${sm.nrm.length}">${sm.nrm.join(' ')}</float_array><technique_common><accessor source="#${id}na" count="${sm.nrm.length/3}" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common></source><vertices id="${id}v"><input semantic="POSITION" source="#${id}p"/></vertices><triangles count="${sm.tri.length/3}" material="wood"><input semantic="VERTEX" source="#${id}v" offset="0"/><input semantic="NORMAL" source="#${id}n" offset="1"/><p>${P.join(' ')}</p></triangles></mesh></geometry>`);
+    let axes;
+    if (p.frame) { const f = p.frame, sgn = Math.sign(f.shown - f.opp) || 1, n = [0, 0, 0]; n[f.ax] = sgn;
+      const T0 = [f.o[0], f.o[1], f.o[2]]; T0[f.ax] = f.opp;
+      axes = { ux: f.ux, uy: f.uy, n, T0 };
+    } else {
+      const b0 = boxes[0], e = [0, 1, 2].map(i => b0.max[i] - b0.min[i]);
+      const nAx = [0, 1, 2].reduce((best, i) => Math.abs(e[i] - p.t) < Math.abs(e[best] - p.t) ? i : best, 0);
+      const rest = [0, 1, 2].filter(i => i !== nAx);
+      const wAx = Math.abs(e[rest[0]] - p.w) <= Math.abs(e[rest[1]] - p.w) ? rest[0] : rest[1];
+      const dAx = rest[0] === wAx ? rest[1] : rest[0];
+      const ux = [0, 0, 0]; ux[wAx] = 1; let uy = [0, 0, 0]; uy[dAx] = 1; const n = [0, 0, 0]; n[nAx] = 1;
+      const T0f = [b0.min[0], b0.min[1], b0.min[2]];
+      const cr = [ux[1] * uy[2] - ux[2] * uy[1], ux[2] * uy[0] - ux[0] * uy[2], ux[0] * uy[1] - ux[1] * uy[0]];
+      if (cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2] < 0) { uy = uy.map(v => -v); T0f[dAx] = b0.max[dAx]; }   // never a mirror: SketchUp shows backfaces on mirrored parts
+      axes = { ux, uy, n, T0: T0f };
+    }
+    const { ux, uy, n, T0 } = axes, mat = p.hardware ? 'metal' : 'wood', matUrl = p.hardware ? '#matMetal' : '#matWood';
+    boxes.forEach((b2, bi) => { const dx = [b2.min[0] - boxes[0].min[0], b2.min[1] - boxes[0].min[1], b2.min[2] - boxes[0].min[2]];
+      const T = [(T0[0] + dx[0]) * S, (T0[1] + dx[1]) * S, (T0[2] + dx[2]) * S];
+      const Mx = [ux[0], uy[0], n[0], T[0], ux[1], uy[1], n[1], T[1], ux[2], uy[2], n[2], T[2], 0, 0, 0, 1];
+      const nm = (p.name + (boxes.length > 1 ? ' ' + (bi + 1) : '')).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+      libs.push('<node id="lib_' + id + '_' + bi + '" name="' + nm + '"><instance_geometry url="#' + id + '"><bind_material><technique_common><instance_material symbol="' + mat + '" target="' + matUrl + '"/></technique_common></bind_material></instance_geometry></node>');
+      nodes.push('<node id="n' + gi + '_' + bi + '" name="' + nm + '" type="NODE"><matrix sid="transform">' + Mx.map(v => +v.toFixed(6)).join(' ') + '</matrix><instance_node url="#lib_' + id + '_' + bi + '"/></node>'); });
   });
-  return '<?xml version="1.0" encoding="utf-8"?><COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1"><asset><unit name="' + (units === 'mm' ? 'millimeter' : 'inch') + '" meter="' + (units === 'mm' ? 0.001 : 0.0254) + '"/><up_axis>Z_UP</up_axis></asset>' +
-    '<library_geometries>' + geos.join('') + '</library_geometries><library_visual_scenes><visual_scene id="S" name="' + esc(stamp()) + '">' + nodes.join('') + '</visual_scene></library_visual_scenes><scene><instance_visual_scene url="#S"/></scene></COLLADA>'; }
+  return '<?xml version="1.0" encoding="utf-8"?>\n<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">' +
+    '<asset><contributor><authoring_tool>CASEMAKER 2</authoring_tool></contributor><unit meter="' + (units === 'mm' ? 0.001 : 0.0254) + '" name="' + (units === 'mm' ? 'millimeter' : 'inch') + '"/><up_axis>Z_UP</up_axis></asset>' +
+    '<library_effects><effect id="fxMetal"><profile_COMMON><technique sid="common"><phong><diffuse><color>0.62 0.64 0.68 1</color></diffuse><specular><color>0.9 0.9 0.9 1</color></specular><shininess><float>40</float></shininess></phong></technique></profile_COMMON></effect><effect id="fxWood"><profile_COMMON><technique sid="common"><lambert><diffuse><color>' + (o3.finish ? (o3.finish === 'cherry' ? '0.69 0.42 0.24 1' : '0.60 0.63 0.68 1') : '0.72 0.55 0.38 1') + '</color></diffuse></lambert></technique></profile_COMMON></effect></library_effects>' + '<library_materials><material id="matWood" name="TFL"><instance_effect url="#fxWood"/></material><material id="matMetal" name="Hardware"><instance_effect url="#fxMetal"/></material></library_materials>' +
+    '<library_geometries>' + geos.join('') + '</library_geometries>' +
+    '<library_nodes>' + libs.join('') + '</library_nodes>' +
+    '<library_visual_scenes><visual_scene id="scene" name="' + stamp() + '">' + nodes.join('') + '</visual_scene></library_visual_scenes>' +
+    '<scene><instance_visual_scene url="#scene"/></scene></COLLADA>';
+}
 
 /* ---------- OPTIONS ---------- */
 const OPT = {
@@ -2914,11 +3344,44 @@ const OPT = {
            ['where', 'WHERE', 'sel', [['sides', 'SIDE PANELS \u00b7 BOTTOM EDGES'], ['bottom', 'BOTTOM PANEL \u00b7 UNDERSIDE (CASTERS)']]],
            ['D', 'BORE DIAMETER'], ['Z', 'BORE DEPTH'], ['inY', 'IN FROM THE ENDS'], ['inX', 'IN FROM THE SIDES (UNDERSIDE ONLY)']]
 };
-let optTab = 'DRAWERS';
+let optTab = 'DRAWERS', optTop = 'HARDWARE';
 function drawOpts() {
-  $('optTabs').innerHTML = Object.keys(OPT).map(t => '<button class="btn ' + (t === optTab ? 'on' : '') + '" data-t="' + t + '">' + t + '</button>').join('');
-  $('optTabs').querySelectorAll('button').forEach(b => b.onclick = () => { optTab = b.dataset.t; drawOpts(); });
+  $('optTabs').innerHTML = ['HARDWARE', 'SETTINGS'].map(t => '<button class="btn ' + (t === optTop ? 'on' : '') + '" data-top="' + t + '">' + t + '</button>').join('') +
+    (optTop === 'SETTINGS' ? '<span style="width:14px"></span>' + Object.keys(OPT).map(t => '<button class="btn sm ' + (t === optTab ? 'on' : '') + '" data-t="' + t + '">' + t + '</button>').join('') : '');
+  $('optTabs').querySelectorAll('[data-top]').forEach(b => b.onclick = () => { optTop = b.dataset.top; drawOpts(); });
+  $('optTabs').querySelectorAll('[data-t]').forEach(b => b.onclick = () => { optTab = b.dataset.t; drawOpts(); });
+  if (optTop === 'HARDWARE') { const n = hwCounts(parts(M));
+    const modelUse = hwModelUse();
+    $('optBody').style.display = 'block';
+    $('optBody').innerHTML =
+      '<div style="font-size:10px;color:var(--mute);line-height:1.7;margin-bottom:12px">EVERY PIECE CARRIES ITS ORIGIN AT THE CENTRE OF ITS MAIN BORE, ON THE FACE IT MOUNTS AGAINST \u00b7 +Z INTO THE PANEL ALONG THE BORE \u00b7 +X TOWARD ITS SECOND HOLE. MCMASTER-CARR STEP / DWG / PDF DRAWINGS DROP ONTO THE SAME ORIGIN. MODELS, DEFAULTS AND NUMBERS SAVE WITH THE JOB. \u25CF = THE DEFAULT \u2014 ANY PLACE A PIECE IS USED CAN PICK ANOTHER MODEL.</div>' +
+      HWCAT.map(c => { const list = hwModels(c.id), def = hwDefault(c.id);
+        return '<div style="margin-bottom:14px"><div style="display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--line);padding-bottom:4px;margin-bottom:2px">' +
+          '<span style="color:var(--amber);font-weight:700;font-size:11px;letter-spacing:.06em">' + c.name + '</span>' +
+          '<span style="color:var(--mute);font-size:9.5px">' + c.on + '</span><span style="flex:1"></span>' +
+          '<span style="color:' + (n[c.id] ? 'var(--amber)' : 'var(--mute)') + ';font-size:10px">' + (n[c.id] ? n[c.id] + ' IN THIS CASE' : '\u2014') + '</span></div>' +
+          (list.length ? '<table style="width:100%;border-collapse:collapse;font-size:10.5px"><tbody>' + list.map((m2, i2) =>
+            '<tr><td style="width:26px;padding:3px 4px"><button class="btn sm' + (i2 === def ? ' on' : '') + '" data-hwdef="' + c.id + ':' + i2 + '" title="Make this the default">' + (i2 === def ? '\u25CF' : '\u25CB') + '</button></td>' +
+            '<td style="color:var(--ink);padding:3px 4px">' + m2.name + '</td>' +
+            '<td style="width:120px"><input data-hwmc="' + c.id + ':' + i2 + '" value="' + (m2.mcm || '') + '" placeholder="MCMASTER #" style="width:104px;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--ink);font:inherit;padding:2px 5px"></td>' +
+            '<td style="width:70px;text-align:right;color:var(--mute);font-size:10px">' + ((modelUse[c.id] || {})[i2] ? (modelUse[c.id] || {})[i2] + ' USED' : '') + '</td>' +
+            '<td style="width:30px">' + (list.length > 1 ? '<button class="btn sm" data-hwrm="' + c.id + ':' + i2 + '">\u00d7</button>' : '') + '</td></tr>').join('') + '</tbody></table>' :
+            '<div style="color:var(--mute);font-size:9.5px;padding:4px">NO MODELS YET \u2014 ADD ONE FROM ITS MCMASTER DRAWING.</div>') +
+          '<div style="display:flex;gap:6px;margin-top:4px"><input data-hwnm="' + c.id + '" placeholder="NEW MODEL" style="width:200px;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--ink);font:inherit;padding:3px 6px">' +
+          '<input data-hwnum="' + c.id + '" placeholder="MCMASTER #" style="width:110px;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--ink);font:inherit;padding:3px 6px">' +
+          '<button class="btn sm" data-hwadd="' + c.id + '">+ ADD MODEL</button></div></div>'; }).join('');
+    $('optBody').querySelectorAll('[data-hwdef]').forEach(el => el.onclick = () => { const [c2, i2] = el.dataset.hwdef.split(':');
+      (M.hwDefault = M.hwDefault || {})[c2] = +i2; drawOpts(); });
+    $('optBody').querySelectorAll('[data-hwmc]').forEach(el => el.onchange = () => { const [c2, i2] = el.dataset.hwmc.split(':');
+      hwModels(c2)[+i2].mcm = el.value.trim(); });
+    $('optBody').querySelectorAll('[data-hwrm]').forEach(el => el.onclick = () => { const [c2, i2] = el.dataset.hwrm.split(':');
+      hwModels(c2).splice(+i2, 1); if (hwDefault(c2) >= hwModels(c2).length) (M.hwDefault = M.hwDefault || {})[c2] = 0; drawOpts(); });
+    $('optBody').querySelectorAll('[data-hwadd]').forEach(el => el.onclick = () => { const c2 = el.dataset.hwadd;
+      const nm = $('optBody').querySelector('[data-hwnm="' + c2 + '"]').value.trim(); if (!nm) return;
+      hwModels(c2).push({ name: nm.toUpperCase(), mcm: $('optBody').querySelector('[data-hwnum="' + c2 + '"]').value.trim() }); drawOpts(); });
+    return; }
   const J2 = M.opt.joinery || (M.opt.joinery = structuredClone(JOINERY));
+  $('optBody').style.display = '';
   const grp = optTab === 'DRAWERS' ? M.opt.drawer : optTab === 'SHELVES' ? M.opt.shelf : optTab === 'JOINERY' ? J2 : optTab === 'GLIDES' ? (J2.glide || (J2.glide = structuredClone(JOINERY.glide))) : M.opt.door;
   $('optBody').innerHTML = OPT[optTab].map(([k, l, ty, os]) => ty === 'sel'
     ? '<div class="sec"><h3>' + l + '</h3><select data-k="' + k + '">' + os.map(o => '<option value="' + o[0] + '"' + (grp[k] === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></div>'
@@ -2936,8 +3399,8 @@ $('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
 $('newBtn').onclick = () => { M = newCase(); HIST.past = []; HIST.future = []; HIST.last = null; UI.sc = null; UI.sel = { kind: 'case' }; $('preset').value = ''; $('job').value = M.job; render(); };
 $('job').onchange = () => { M.job = $('job').value; };
 $('saveBtn').onclick = () => {
-  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.21', saved: new Date().toISOString(), model: M };
-  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.21'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
+  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.32', saved: new Date().toISOString(), model: M };
+  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.32'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
 $('loadBtn').onclick = () => $('loadFile').click();
 $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
   f.text().then(t => { try { const d = JSON.parse(t); if (d.format !== 'CASEMAKER2') throw new Error('not a CASEMAKER 2 file');
@@ -2948,7 +3411,7 @@ $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
    Served over http: the page re-reads itself every minute and compares build stamps.
    Opened from a file: the browser blocks reading files, so tabs tell each other instead -
    opening a newer build in any tab tells every older tab on this machine. */
-const BUILD = '2026-09-03.21';
+const BUILD = '2026-09-03.32';
 const newer = (a, b) => { if (!a || !b) return false; const [da, na] = a.split('.'), [db, nb] = b.split('.');
   return da > db || (da === db && (+na || 0) > (+nb || 0)); };
 function showUpdate(build) { $('updateT').textContent = 'A NEW BUILD OF CASEMAKER IS AVAILABLE · ' + build + ' (YOU ARE ON ' + BUILD + ')'; $('update').classList.add('show'); }
