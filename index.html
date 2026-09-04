@@ -91,7 +91,7 @@ label.f .mm{color:var(--mute);font-size:9px}
 <body>
 <div class="update" id="update"><span id="updateT">A NEW BUILD OF CASEMAKER IS AVAILABLE</span><button class="btn" id="updateGo">RELOAD</button><button class="x" id="updateX" title="Dismiss">✕</button></div>
 <header>
-  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.39 </div></div>
+  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.40 </div></div>
   <input class="job" id="job" value="NEW CASE">
   <select id="preset"><option value="">SAMPLE PRODUCTS</option></select>
   <span style="width:14px"></span>
@@ -758,7 +758,10 @@ function loadPreset(name) {
     M2.hwModels.campin = [
       { name: 'HAFELE SPREADING BOLT B32', mcm: '262.09.302', dims: { B: 1.2598 } },
       { name: 'HAFELE SPREADING BOLT B34', mcm: '262.09.302', dims: { B: 1.3386 } }];
-    (M2.hwDefault = M2.hwDefault || {}).campin = 0; return M2; };
+    M2.hwModels.pull = [
+      { name: 'MCMASTER 6\u2033 RECT PULL', mcm: '15145A61', dims: { cc: 6, holeD: 0.1875, off: 1.1811, len: 6.25, proj: 1.5, barW: 0.5, screw: '#8-32' } },
+      { name: 'WIRE PULL 128 MM CC', mcm: '' }];
+    (M2.hwDefault = M2.hwDefault || {}).campin = 0; M2.hwDefault.pull = 0; return M2; };
   const M = newCase({ W: p.W, H: p.H, D: p.D, T: p.T, backT: p.backT,
                       kick: p.kick, bottom: p.bottom || 'between',
                       topFront: p.topFront === 'flush' ? p.T : (p.topFront || 0), topEnds: p.topEnds || 0 });
@@ -855,6 +858,13 @@ function applyJoinery(M, out) {
     const hDims = M.hwModels && M.hwModels[kindCat] && M.hwModels[kindCat][hIdx] && M.hwModels[kindCat][hIdx].dims;
     const H2 = hDims && hDims.cupZ ? { ...H, cupZ: hDims.cupZ, cupD: hDims.cupD || H.cupD } : H;
     const ys = hingeCups(door, H2, bayH.hinges, bayH.hingeEnd);
+    const pIdx = bayH.pullModel != null ? bayH.pullModel : ((M.hwDefault || {}).pull || 0);
+    const pDims = M.hwModels && M.hwModels.pull && M.hwModels.pull[pIdx] && M.hwModels.pull[pIdx].dims;
+    if (pDims && pDims.cc) {                                                    // the handle: opposite the hinge, vertical, centred
+      const pOff = pDims.off || 1.1811;                                         // 30 mm off the edge
+      const px = door.hingeEdge === 'L' ? r4(door.w - pOff) : r4(pOff);
+      [r4(door.h / 2 - pDims.cc / 2), r4(door.h / 2 + pDims.cc / 2)].forEach(py =>
+        addHole(door, 'PULL', px, py, pDims.holeD || 0.1875, door.t)); }        // through, for the machine screws
     const hx = door.hingeEdge === 'L' ? door.box.min[0] : door.box.max[0];
     const carrier = door.hingeEdge === 'L' ? (carrierAtLeft(r4(hx + T / 2)) || carrierAtLeft(r4(hx + T))) : (carrierAtRight(r4(hx - T / 2)) || carrierAtRight(r4(hx - T)));
     const cands = [L, R, ...dividers].filter(Boolean).map(q => ({ q, d: Math.min(Math.abs(q.box.min[0] - hx), Math.abs(q.box.max[0] - hx)) })).sort((a, b) => a.d - b.d);
@@ -2497,7 +2507,7 @@ function inspector() {
 }
 
 /* ---------- PARTS LIST ---------- */
-const HOLE_INK = { CAM: ['#f5a524', 1], PIN: ['#4d9fff', 0], DOWEL: ['#4dd07a', 0], SHELFPIN: ['#c77dff', 0], SCREW: ['#c77dff', 0], GLIDE: ['#c77dff', 0], HINGE: ['#f5a524', 0], GROMMET: ['#ff6b6b', 0] };
+const HOLE_INK = { CAM: ['#f5a524', 1], PIN: ['#4d9fff', 0], DOWEL: ['#4dd07a', 0], SHELFPIN: ['#c77dff', 0], SCREW: ['#c77dff', 0], GLIDE: ['#c77dff', 0], HINGE: ['#f5a524', 0], GROMMET: ['#ff6b6b', 0], PULL: ['#4d9fff', 0] };
 function edgeNameOf(pt, x0, y0, x1, y1) {                 // name a drawing edge by where it sits in the case
   if (!pt.frame) return '';
   const A = toWorld(pt, x0, y0, 'shown'), B = toWorld(pt, x1, y1, 'shown');
@@ -2652,7 +2662,7 @@ function download(name, data, type) {                                          /
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.39'.slice(0, 10);
+const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.40'.slice(0, 10);
 
 function openFlyout(which) {
   UI.fly = which;
@@ -2947,12 +2957,12 @@ async function buildInstructions() {
   const allB = numbered.flatMap(boxesOf); const caseW = Math.max(...allB.map(bb => bb.max[0]), 1);
   const flatBox = bb => ({ ...bb, min: [bb.min[2], bb.min[1], caseW - bb.max[0]], max: [bb.max[2], bb.max[1], caseW - bb.min[0]] });
   const lift = Math.max(2, M.H * 0.08);
-  const dstr = '2026-09-03.39'.slice(0, 10);
+  const dstr = '2026-09-03.40'.slice(0, 10);
   const stepsPerPage = 6; const totalPages = 1 + Math.ceil(plan.length / stepsPerPage);
   const header = pg => { pdf.page(); const lh = 34, lw = lh * logo.width / logo.height; pdf.image(logo, MG, MG, lw, lh);
     pdf.text(PW - MG, MG + 12, 'Assembly Instructions', 13, true, 'right'); pdf.text(PW - MG, MG + 30, 'MODEL NO.: ' + modelNo, 15, true, 'right');
     pdf.line(MG, MG + 44, PW - MG, MG + 44, 1.4); pdf.text(PW / 2, MG + 64, title, 18, true, 'center'); pdf.text(PW - MG, MG + 64, dstr, 8, false, 'right');
-    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.39', 7, false, 'right', 0.4); return MG + 76; };
+    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.40', 7, false, 'right', 0.4); return MG + 76; };
   let y = header(1);
   const cw = CW / hw.length, rowH = 78; pdf.rect(MG, y, CW, rowH, { lw: 0.9 });
   hw.forEach((r, i) => { const x = MG + i * cw; if (i) pdf.line(x, y, x, y + rowH, 0.9); pdf.rect(x, y, cw, 14, { fill: 0.9 }); pdf.text(x + cw / 2, y + 10, r.code, 8, true, 'center');
@@ -3032,7 +3042,7 @@ function ncFor(p) {
   const J = M.opt.joinery || JOINERY, maxB = EXP.drill.maxBore;
   const r = cnc1Program(P), code = Array.isArray(r.code) ? r.code.join('\n') : String(r.code || '');
   const head = [];
-  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.39 - ' + p.name + ' x' + p.qty);
+  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.40 - ' + p.name + ' x' + p.qty);
   head.push(';STOCK ' + p.t + '" - HOLE CENTERLINE ' + r3(P._ctr) + '" FROM THE CAM FACE');
   head.push(';PANEL LIES CAM FACE ' + (P._faceDown ? 'DOWN' : 'UP') + ': Z DEPTH OVERRIDE ' + P.zOverride + '" OFF THE TABLE');
   head.push(';LOAD TURNED 90 LEFT FROM THE DRAWING: ' + r3(p.w) + '" LONG SIDE RUNS DOWN Y (VACUUM ZONE), ' + r3(p.h) + '" ACROSS X');
@@ -3262,7 +3272,9 @@ const HWCAT = [
     seeddims: { thread: 'M6 \u00d7 1', L: 0.394, bodyD: 0.492, drill: 0.358 },
     seed2: 'MCMASTER M6 \u00d7 13 SOFTWOOD', seed2mcm: '95596A500',
     seed2dims: { thread: 'M6 \u00d7 1', L: 0.512, bodyD: 0.487 } },
-  { id: 'pull', name: 'HANDLES \u00b7 DOORS AND DRAWERS', on: 'PULL BORES', seed: 'WIRE PULL 128 MM CC' },
+  { id: 'pull', name: 'HANDLES \u00b7 DOORS AND DRAWERS', on: 'PULL BORES \u00d83/16 THROUGH', seed: 'MCMASTER 6\u2033 RECT PULL', seedmcm: '15145A61',
+    seeddims: { cc: 6, holeD: 0.1875, off: 1.1811, len: 6.25, proj: 1.5, barW: 0.5, screw: '#8-32' },
+    seed2: 'WIRE PULL 128 MM CC' },
   { id: 'rodhold', name: 'CLOSET ROD HOLDERS', on: 'ROUTED POCKET', seed: 'STYLE A \u00b7 STADIUM', seed2: 'STYLE B \u00b7 ROUND CUP' },
   { id: 'rod', name: 'CLOSET RODS', on: 'THE HOLDERS', seed: 'ROD \u00d825 \u00b7 CUT TO LENGTH' }
 ];
@@ -3272,6 +3284,7 @@ function hwDimsLine(d) { const o = [];
   if (d.pinD) o.push('PIN \u00d8' + d.pinD + '\u2033 \u00d7 ' + d.pinL + '\u2033');
   if (d.studL) o.push('STUD ' + d.thread + ' \u00d7 ' + d.studL + '\u2033 \u00b7 BASE \u00d8' + d.baseD + '\u2033');
   if (d.B) o.push('B ' + Math.round(d.B * 25.4) + ' MM \u00b7 NUT LINE FOLLOWS');
+  if (d.cc) o.push(d.cc + '\u2033 CC \u00b7 ' + (d.screw || '') + ' \u00b7 30 MM OFF THE EDGE');
   if (d.L && d.thread) o.push(d.thread + ' \u00d7 ' + d.L + '\u2033' + (d.drill ? ' \u00b7 DRILL \u00d8' + d.drill + '\u2033' : ''));
   if (d.screw) o.push(d.screw); if (d.doorT) o.push('DOORS ' + d.doorT + '\u2033');
   return o.join(' \u00b7 ');
@@ -3420,6 +3433,18 @@ function synthHardware(ps) {                                                   /
             mesh: { v: bm.v, f: bm.f, m: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], o: [C[0], C[1], C[2] - gd.baseH] } });
         } else out.push({ name: 'FLOOR GLIDE', hardware: true, qty: 1, w: 0.9, h: 0.9, t: 0.9, hwKind: 'glide',
           box: { min: [C[0] - 0.45, C[1] - 0.45, C[2] - (h.edge ? 0.35 : 0.9)], max: [C[0] + 0.45, C[1] + 0.45, C[2]] } });
+        return; }
+      if (h.type === 'PULL' && p.name.startsWith('DOOR')) {                    // one handle per pair: emit on the lower hole only
+        const pulls = p.holes.filter(q => q.type === 'PULL');
+        if (pulls.indexOf(h) !== 0) return;
+        const hi2 = pulls[1] || h;
+        const frontN = n0.map(v => -v);                                          // the door's outside face
+        const C1 = toWorld(p, h.x, h.y, 'opp'), C2 = toWorld(p, hi2.x, hi2.y, 'opp');
+        const mid = [0, 1, 2].map(i => (C1[i] + C2[i]) / 2);
+        const leg = (C) => boxAt(C, f.ux, f.uy, frontN, 0.5, 0.42, 0, 0.9);
+        out.push({ name: 'PULL HANDLE', hardware: true, qty: 1, w: 6.25, h: 0.5, t: 1.5, hwKind: 'pin',
+          boxes: [leg(C1), leg(C2),
+            boxAt([0, 1, 2].map(i => mid[i] + frontN[i] * 0.88), f.ux, f.uy, frontN, 0.5, 6.25, 0, 0.62)] });
         return; }
       if (h.type === 'HINGE' && p.name.startsWith('DOOR')) {                    // cup + arm, sized by the picked model
         const inFace = h.under ? 'opp' : 'shown';
@@ -3576,8 +3601,8 @@ $('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
 $('newBtn').onclick = () => { M = newCase(); HIST.past = []; HIST.future = []; HIST.last = null; UI.sc = null; UI.sel = { kind: 'case' }; $('preset').value = ''; $('job').value = M.job; render(); };
 $('job').onchange = () => { M.job = $('job').value; };
 $('saveBtn').onclick = () => {
-  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.39', saved: new Date().toISOString(), model: M };
-  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.39'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
+  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.40', saved: new Date().toISOString(), model: M };
+  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.40'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
 $('loadBtn').onclick = () => $('loadFile').click();
 $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
   f.text().then(t => { try { const d = JSON.parse(t); if (d.format !== 'CASEMAKER2') throw new Error('not a CASEMAKER 2 file');
@@ -3588,7 +3613,7 @@ $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
    Served over http: the page re-reads itself every minute and compares build stamps.
    Opened from a file: the browser blocks reading files, so tabs tell each other instead -
    opening a newer build in any tab tells every older tab on this machine. */
-const BUILD = '2026-09-03.39';
+const BUILD = '2026-09-03.40';
 const newer = (a, b) => { if (!a || !b) return false; const [da, na] = a.split('.'), [db, nb] = b.split('.');
   return da > db || (da === db && (+na || 0) > (+nb || 0)); };
 function showUpdate(build) { $('updateT').textContent = 'A NEW BUILD OF CASEMAKER IS AVAILABLE · ' + build + ' (YOU ARE ON ' + BUILD + ')'; $('update').classList.add('show'); }
