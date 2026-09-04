@@ -91,7 +91,7 @@ label.f .mm{color:var(--mute);font-size:9px}
 <body>
 <div class="update" id="update"><span id="updateT">A NEW BUILD OF CASEMAKER IS AVAILABLE</span><button class="btn" id="updateGo">RELOAD</button><button class="x" id="updateX" title="Dismiss">✕</button></div>
 <header>
-  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.40 </div></div>
+  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.41 </div></div>
   <input class="job" id="job" value="NEW CASE">
   <select id="preset"><option value="">SAMPLE PRODUCTS</option></select>
   <span style="width:14px"></span>
@@ -278,9 +278,11 @@ function hingeCups(door, H, nOv, endOv) {
   return ys;
 }
 function hingePlates(carrier, door, ys, H) {
+  const f = carrier.frame;
+  const mid = (door.box.min[f.ax] + door.box.max[f.ax]) / 2;                 // the bay the door covers
+  const far = Math.abs(mid - f.opp) < Math.abs(mid - f.shown);               // the plate face looks INTO that bay
   ys.forEach(y => { const W = toWorld(door, door.hingeEdge === 'L' ? 0 : door.w, y, 'shown');   // hinge line in the case
     const [cx] = toDrawing(carrier, W);                                      // along the carrier's height
-    const f = carrier.frame, far = Math.abs(W[f.ax] - f.opp) < Math.abs(W[f.ax] - f.shown);   // the face the door hangs on
     [cx - H.plateSp / 2, cx + H.plateSp / 2].forEach(x => addHole(carrier, 'SCREW', r4(x), H.plate, H.screwD, H.screwZ, false, undefined, far)); });
 }
 
@@ -2213,7 +2215,8 @@ function isoCanvas(boxes,opts){
       const u=( dx*a2[1]-dy*a2[0])/det, v=(-dx*a1[1]+dy*a1[0])/det; const q=u*u+v*v; if(q>1) continue;
       const zpx=C[2]+u*(P1[2]-C[2])+v*(P2[2]-C[2]);                             // the bore's own plane depth at this pixel
       const k=y*W+x; if(id[k]<0||zpx<zb[k]-0.12) continue;
-      const o=k*4, dkr=q>0.55?0.25:0.45;                 // rim darker than the bore
+      const soft=hl.soft?0.35:0;                          // a shallow pilot is a tap mark, not a void
+      const o=k*4, dkr=(q>0.55?0.25:0.45)+soft;
       px[o]=Math.round(px[o]*dkr); px[o+1]=Math.round(px[o+1]*dkr); px[o+2]=Math.round(px[o+2]*dkr); } });
   // edges: pixels where the face id changes are silhouettes / creases → ink
   const out=ctx.createImageData(W,H), q=out.data;
@@ -2240,8 +2243,9 @@ function isoHoles(list) {                                                     //
     const n = [0, 0, 0]; n[f.ax] = Math.sign(f.shown - f.opp) || 1;
     const face = which => which === 'shown' ? { at: 'shown', nrm: n } : { at: 'opp', nrm: n.map(v => -v) };
     const put = (x, y, rx, ry, which) => { const F = face(which), c = toWorld(p, x, y, F.at);
-      out.push({ c: c.map((v, i) => v + F.nrm[i] * 0.01),
-        e1: f.ux.map(v => v * rx), e2: f.uy.map(v => v * ry) }); };
+      const e = { c: c.map((v, i) => v + F.nrm[i] * 0.01),
+        e1: f.ux.map(v => v * rx), e2: f.uy.map(v => v * ry) };
+      out.push(e); return e; };
     (p.holes || []).forEach(h => {
       if (h.edge) {                                                             // only the glide bores: every other edge bore hides in a joint
         if (h.type !== 'GLIDE') return;
@@ -2255,7 +2259,8 @@ function isoHoles(list) {                                                     //
         return; }
       const thru = (h.z || 0) >= p.t - 0.01, r = h.d / 2;
       if (thru) { put(h.x, h.y, r, r, 'shown'); put(h.x, h.y, r, r, 'opp'); }
-      else put(h.x, h.y, r, r, h.under ? 'opp' : 'shown'); });
+      else { const e = put(h.x, h.y, r, r, h.under ? 'opp' : 'shown');
+        if (e && (h.z || 0) < p.t * 0.5) e.soft = true; } });
     (p.voids || []).forEach(v => { const xs = v.ring.map(q => q[0]), ys = v.ring.map(q => q[1]);
       const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
       const rx = (Math.max(...xs) - Math.min(...xs)) / 2, ry = (Math.max(...ys) - Math.min(...ys)) / 2;
@@ -2662,7 +2667,7 @@ function download(name, data, type) {                                          /
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.40'.slice(0, 10);
+const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.41'.slice(0, 10);
 
 function openFlyout(which) {
   UI.fly = which;
@@ -2957,12 +2962,12 @@ async function buildInstructions() {
   const allB = numbered.flatMap(boxesOf); const caseW = Math.max(...allB.map(bb => bb.max[0]), 1);
   const flatBox = bb => ({ ...bb, min: [bb.min[2], bb.min[1], caseW - bb.max[0]], max: [bb.max[2], bb.max[1], caseW - bb.min[0]] });
   const lift = Math.max(2, M.H * 0.08);
-  const dstr = '2026-09-03.40'.slice(0, 10);
+  const dstr = '2026-09-03.41'.slice(0, 10);
   const stepsPerPage = 6; const totalPages = 1 + Math.ceil(plan.length / stepsPerPage);
   const header = pg => { pdf.page(); const lh = 34, lw = lh * logo.width / logo.height; pdf.image(logo, MG, MG, lw, lh);
     pdf.text(PW - MG, MG + 12, 'Assembly Instructions', 13, true, 'right'); pdf.text(PW - MG, MG + 30, 'MODEL NO.: ' + modelNo, 15, true, 'right');
     pdf.line(MG, MG + 44, PW - MG, MG + 44, 1.4); pdf.text(PW / 2, MG + 64, title, 18, true, 'center'); pdf.text(PW - MG, MG + 64, dstr, 8, false, 'right');
-    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.40', 7, false, 'right', 0.4); return MG + 76; };
+    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.41', 7, false, 'right', 0.4); return MG + 76; };
   let y = header(1);
   const cw = CW / hw.length, rowH = 78; pdf.rect(MG, y, CW, rowH, { lw: 0.9 });
   hw.forEach((r, i) => { const x = MG + i * cw; if (i) pdf.line(x, y, x, y + rowH, 0.9); pdf.rect(x, y, cw, 14, { fill: 0.9 }); pdf.text(x + cw / 2, y + 10, r.code, 8, true, 'center');
@@ -3042,7 +3047,7 @@ function ncFor(p) {
   const J = M.opt.joinery || JOINERY, maxB = EXP.drill.maxBore;
   const r = cnc1Program(P), code = Array.isArray(r.code) ? r.code.join('\n') : String(r.code || '');
   const head = [];
-  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.40 - ' + p.name + ' x' + p.qty);
+  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.41 - ' + p.name + ' x' + p.qty);
   head.push(';STOCK ' + p.t + '" - HOLE CENTERLINE ' + r3(P._ctr) + '" FROM THE CAM FACE');
   head.push(';PANEL LIES CAM FACE ' + (P._faceDown ? 'DOWN' : 'UP') + ': Z DEPTH OVERRIDE ' + P.zOverride + '" OFF THE TABLE');
   head.push(';LOAD TURNED 90 LEFT FROM THE DRAWING: ' + r3(p.w) + '" LONG SIDE RUNS DOWN Y (VACUUM ZONE), ' + r3(p.h) + '" ACROSS X');
@@ -3458,8 +3463,10 @@ function synthHardware(ps) {                                                   /
         const cm2b = cylMesh(h.d / 2, cupZ2 + 0.05, 20);
         out.push({ name: nm2, hardware: true, qty: 1, w: armL2, h: armW2, t: cupZ2, hwKind: 'hinge',
           mesh: { v: cm2b.v, f: cm2b.f, m: [f.ux, f.uy.map(v => -v), n.map(v => -v)], o: C.map((v, i) => v + n[i] * 0.045) } });
+        const edgeDist = p.hingeEdge === 'L' ? h.x : r4(p.w - h.x);           // stop the arm just past the door edge
+        const fwd = Math.min(armL2 - 0.35, edgeDist + 0.1), back = r4(armL2 - fwd);
         out.push({ name: nm2, hardware: true, qty: 1, w: armL2, h: armW2, t: leafT, hwKind: 'hinge',
-          box: boxAt([0, 1, 2].map(i => C[i] + ex[i] * (armL2 / 2 - h.d / 2)), ex, f.uy, n, armL2, armW2, 0, leafT) }); return; }
+          box: boxAt([0, 1, 2].map(i => C[i] + ex[i] * ((fwd - back) / 2)), ex, f.uy, n, r4(fwd + back), armW2, 0, leafT) }); return; }
       if (h.type === 'CAM' && !h.edge) {                                        // the picked nut model, set in its bore
         const C = toWorld(p, h.x, h.y, h.under ? 'opp' : 'shown');
         const outw = h.under ? n0.map(v => -v) : n0;                             // the drilled face's outward normal
@@ -3601,8 +3608,8 @@ $('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
 $('newBtn').onclick = () => { M = newCase(); HIST.past = []; HIST.future = []; HIST.last = null; UI.sc = null; UI.sel = { kind: 'case' }; $('preset').value = ''; $('job').value = M.job; render(); };
 $('job').onchange = () => { M.job = $('job').value; };
 $('saveBtn').onclick = () => {
-  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.40', saved: new Date().toISOString(), model: M };
-  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.40'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
+  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.41', saved: new Date().toISOString(), model: M };
+  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.41'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
 $('loadBtn').onclick = () => $('loadFile').click();
 $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
   f.text().then(t => { try { const d = JSON.parse(t); if (d.format !== 'CASEMAKER2') throw new Error('not a CASEMAKER 2 file');
@@ -3613,7 +3620,7 @@ $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
    Served over http: the page re-reads itself every minute and compares build stamps.
    Opened from a file: the browser blocks reading files, so tabs tell each other instead -
    opening a newer build in any tab tells every older tab on this machine. */
-const BUILD = '2026-09-03.40';
+const BUILD = '2026-09-03.41';
 const newer = (a, b) => { if (!a || !b) return false; const [da, na] = a.split('.'), [db, nb] = b.split('.');
   return da > db || (da === db && (+na || 0) > (+nb || 0)); };
 function showUpdate(build) { $('updateT').textContent = 'A NEW BUILD OF CASEMAKER IS AVAILABLE · ' + build + ' (YOU ARE ON ' + BUILD + ')'; $('update').classList.add('show'); }
