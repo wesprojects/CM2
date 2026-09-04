@@ -89,7 +89,7 @@ label.f .mm{color:var(--mute);font-size:9px}
 <body>
 <div class="update" id="update"><span id="updateT">A NEW BUILD OF CASEMAKER IS AVAILABLE</span><button class="btn" id="updateGo">RELOAD</button><button class="x" id="updateX" title="Dismiss">✕</button></div>
 <header>
-  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.34 </div></div>
+  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.35 </div></div>
   <input class="job" id="job" value="NEW CASE">
   <select id="preset"><option value="">SAMPLE PRODUCTS</option></select>
   <span style="width:14px"></span>
@@ -649,7 +649,7 @@ function parts(M) {
       const k = Math.round((want - O.pinDia / 2 - O.pinFirst) / O.pinPitch);   // nearest pin row
       const z = r4(Math.min(Math.max(O.pinFirst + k * O.pinPitch + O.pinDia / 2, c.z0 + 1), c.z1 - T - 1));
       P('ADJ SHELF', r4(c.w - 2 * O.sideClear), r4(backY - Math.max(O.frontGap, M.frontY || 0)), T,
-        { min: [r4(c.x0 + O.sideClear), Math.max(O.frontGap, M.frontY || 0), z], max: [r4(c.x1 - O.sideClear), backY, r4(z + T)] });
+        { min: [r4(c.x0 + O.sideClear), Math.max(O.frontGap, M.frontY || 0), z], max: [r4(c.x1 - O.sideClear), backY, r4(z + T)] }, { forBay: c.key });
     }
     if (b.content === 'drawers') drawerStack(M, c, b).forEach(p => out.push(p));
     if (b.content === 'door' || b.content === 'doors2') emitDoors(c, b, false);   // its band is excluded from the case doors, so it keeps its own style
@@ -836,7 +836,11 @@ function applyJoinery(M, out) {
   const H = M.opt.joinery ? (M.opt.joinery.hinge || JOINERY.hinge) : JOINERY.hinge;
   out.filter(p => p.name.startsWith('DOOR')).forEach(door => {
     const bayH = M.bays[door.doorFor] || {};
-    const ys = hingeCups(door, H, bayH.hinges, bayH.hingeEnd);
+    const kindCat = (door.hingeKind || '').indexOf('HALF') === 0 ? 'hingehalf' : (door.hingeKind || '').indexOf('INSET') === 0 ? 'hingeinset' : 'hingefull';
+    const hIdx = bayH.hingeModel != null ? bayH.hingeModel : ((M.hwDefault || {})[kindCat] || 0);
+    const hDims = M.hwModels && M.hwModels[kindCat] && M.hwModels[kindCat][hIdx] && M.hwModels[kindCat][hIdx].dims;
+    const H2 = hDims && hDims.cupZ ? { ...H, cupZ: hDims.cupZ, cupD: hDims.cupD || H.cupD } : H;
+    const ys = hingeCups(door, H2, bayH.hinges, bayH.hingeEnd);
     const hx = door.hingeEdge === 'L' ? door.box.min[0] : door.box.max[0];
     const carrier = door.hingeEdge === 'L' ? (carrierAtLeft(r4(hx + T / 2)) || carrierAtLeft(r4(hx + T))) : (carrierAtRight(r4(hx - T / 2)) || carrierAtRight(r4(hx - T)));
     const cands = [L, R, ...dividers].filter(Boolean).map(q => ({ q, d: Math.min(Math.abs(q.box.min[0] - hx), Math.abs(q.box.max[0] - hx)) })).sort((a, b) => a.d - b.d);
@@ -2423,6 +2427,7 @@ function inspector() {
     box.querySelectorAll('input').forEach(i => i.disabled = true);
     return; }
   $('selK').textContent = 'CASE'; $('selS').textContent = 'OVERALL CASE PROPERTIES';
+
   box.innerHTML = '<div class="grp"><div class="t">SIZE</div><div class="row">' +
     F('WIDTH', 'cW', M.W) + F('HEIGHT', 'cH', M.H) + F('DEPTH', 'cD', M.D) + F('STOCK THICKNESS', 'cT', M.T) + F('BACK THICKNESS', 'cBT', M.backT) + '</div></div>' +
     '<div class="grp"><div class="t">BASE</div><div class="row">' + F('KICK HEIGHT', 'cK', M.kick) + F('KICK INSET', 'cKI', M.kickInset, 0.0197) + '</div></div>' +
@@ -2433,6 +2438,8 @@ function inspector() {
       SL('BACK', 'ptBack', M.back, [['full', 'FULL STOCK'], ['none', 'NONE']]) +
       SL('BACK EDGE', 'ptBackE', M.backEdge, [['inset', 'INSET 1 MM (DEFAULT)'], ['flush', 'FLUSH']]) + '</div></div>' +
       '<div class="grp"><div class="t">FINISH</div>' + seg('', 'cFin', M.finish || 'grey', [['grey', 'GREY'], ['cherry', 'CHERRY']]) + '</div>' +
+      (hwModels('glide').length > 1 ? '<div class="grp"><div class="t">GLIDE MODEL</div>' + SL('', 'cGli', String(M.glideModel != null ? M.glideModel : hwDefault('glide')),
+        hwModels('glide').map((m2, i2) => [String(i2), m2.name + (i2 === hwDefault('glide') ? ' \u00b7 DEFAULT' : '')])) + '</div>' : '') +
       (() => { const CB = bayOf(M, 'CASE'), on = CB.content === 'door' || CB.content === 'doors2';
         return '<div class="grp"><div class="t">DOORS ON THE WHOLE CASE</div>' +
           seg('', 'cdN', CB.content === 'doors2' ? 'doors2' : CB.content === 'door' ? 'door' : 'open', [['open', 'NONE'], ['door', 'ONE DOOR'], ['doors2', '2 DOORS']]) +
@@ -2446,7 +2453,7 @@ function inspector() {
     wire('cdN', v => CB.content = v); wire('cdS', v => CB.doorStyle = v); wire('cdH', v => CB.hinge = v);
     const hn = $('cdHn'); if (hn) hn.onchange = () => { CB.hinges = hn.value; render(); };
     const he = $('cdHe'); if (he) he.onchange = () => { CB.hingeEnd = he.value.trim() === '' ? null : parseFloat(he.value); render(); }; })();
-  wire('cFin', v => { M.finish = v; });
+  wire('cFin', v => { M.finish = v; }); bind('cGli', v => M.glideModel = +v);
   bind('cW', v => M.W = v); bind('cH', v => M.H = v); bind('cD', v => M.D = v); bind('cT', v => M.T = v); bind('cBT', v => M.backT = v);
   bind('cK', v => M.kick = v); bind('cKI', v => M.kickInset = v); bind('cTF', v => M.topFront = v); bind('cTE', v => M.topEnds = v);
   bind('ptTop', v => M.top = v); bind('ptBot', v => M.bottom = v); bind('ptBack', v => M.back = v); bind('ptBackE', v => M.backEdge = v);
@@ -2608,7 +2615,7 @@ function download(name, data, type) {                                          /
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.34'.slice(0, 10);
+const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.35'.slice(0, 10);
 
 function openFlyout(which) {
   UI.fly = which;
@@ -2903,12 +2910,12 @@ async function buildInstructions() {
   const allB = numbered.flatMap(boxesOf); const caseW = Math.max(...allB.map(bb => bb.max[0]), 1);
   const flatBox = bb => ({ ...bb, min: [bb.min[2], bb.min[1], caseW - bb.max[0]], max: [bb.max[2], bb.max[1], caseW - bb.min[0]] });
   const lift = Math.max(2, M.H * 0.08);
-  const dstr = '2026-09-03.34'.slice(0, 10);
+  const dstr = '2026-09-03.35'.slice(0, 10);
   const stepsPerPage = 6; const totalPages = 1 + Math.ceil(plan.length / stepsPerPage);
   const header = pg => { pdf.page(); const lh = 34, lw = lh * logo.width / logo.height; pdf.image(logo, MG, MG, lw, lh);
     pdf.text(PW - MG, MG + 12, 'Assembly Instructions', 13, true, 'right'); pdf.text(PW - MG, MG + 30, 'MODEL NO.: ' + modelNo, 15, true, 'right');
     pdf.line(MG, MG + 44, PW - MG, MG + 44, 1.4); pdf.text(PW / 2, MG + 64, title, 18, true, 'center'); pdf.text(PW - MG, MG + 64, dstr, 8, false, 'right');
-    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.34', 7, false, 'right', 0.4); return MG + 76; };
+    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.35', 7, false, 'right', 0.4); return MG + 76; };
   let y = header(1);
   const cw = CW / hw.length, rowH = 78; pdf.rect(MG, y, CW, rowH, { lw: 0.9 });
   hw.forEach((r, i) => { const x = MG + i * cw; if (i) pdf.line(x, y, x, y + rowH, 0.9); pdf.rect(x, y, cw, 14, { fill: 0.9 }); pdf.text(x + cw / 2, y + 10, r.code, 8, true, 'center');
@@ -2988,7 +2995,7 @@ function ncFor(p) {
   const J = M.opt.joinery || JOINERY, maxB = EXP.drill.maxBore;
   const r = cnc1Program(P), code = Array.isArray(r.code) ? r.code.join('\n') : String(r.code || '');
   const head = [];
-  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.34 - ' + p.name + ' x' + p.qty);
+  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.35 - ' + p.name + ' x' + p.qty);
   head.push(';STOCK ' + p.t + '" - HOLE CENTERLINE ' + r3(P._ctr) + '" FROM THE CAM FACE');
   head.push(';PANEL LIES CAM FACE ' + (P._faceDown ? 'DOWN' : 'UP') + ': Z DEPTH OVERRIDE ' + P.zOverride + '" OFF THE TABLE');
   head.push(';LOAD TURNED 90 LEFT FROM THE DRAWING: ' + r3(p.w) + '" LONG SIDE RUNS DOWN Y (VACUUM ZONE), ' + r3(p.h) + '" ACROSS X');
@@ -3188,26 +3195,51 @@ const CAM_MESH = { v: [-0.2953,-0.0052,0.0,-0.2953,-0.0052,0.0197,-0.2953,0.0016
 /* Categories hold models. The job keeps its own model list and per-category default;
    any place hardware is applied can pick a different model than the default. */
 const HWCAT = [
-  { id: 'hingefull', name: 'FULL OVERLAY HINGES (0 MM CRANK)', on: 'HINGE CUP \u00d835', seed: 'STANDARD 35 MM CLIP-ON \u00b7 FULL' },
-  { id: 'hingehalf', name: 'HALF OVERLAY HINGES (9.5 MM CRANK)', on: 'HINGE CUP \u00d835', seed: 'STANDARD 35 MM CLIP-ON \u00b7 HALF' },
-  { id: 'hingeinset', name: 'INSET HINGES (16 MM CRANK)', on: 'HINGE CUP \u00d835', seed: 'STANDARD 35 MM CLIP-ON \u00b7 INSET' },
-  { id: 'peg', name: 'SHELF PEGS', on: 'SHELF PIN BORE \u00d85', seed: '5 MM STEEL PEG' },
-  { id: 'glide', name: 'FLOOR GLIDES', on: 'GLIDE BORE', seed: 'LEVELLING GLIDE M8' },
+  { id: 'hingefull', name: 'FULL OVERLAY HINGES (0 MM CRANK)', on: 'HINGE CUP \u00d835', seed: 'STANDARD 35 MM CLIP-ON \u00b7 FULL',
+    seed2: 'MCMASTER HALF-MORTISE 105\u00b0', seed2mcm: '15215A21',
+    seed2dims: { cupD: 1.38, cupZ: 0.43, armL: 2.25, armW: 0.78, leafT: 0.16 } },
+  { id: 'hingehalf', name: 'HALF OVERLAY HINGES (9.5 MM CRANK)', on: 'HINGE CUP \u00d835', seed: 'STANDARD 35 MM CLIP-ON \u00b7 HALF',
+    seed2: 'MCMASTER HALF-MORTISE 105\u00b0', seed2mcm: '15215A22',
+    seed2dims: { cupD: 1.38, cupZ: 0.43, armL: 2.25, armW: 0.78, leafT: 0.16 } },
+  { id: 'hingeinset', name: 'INSET HINGES (16 MM CRANK)', on: 'HINGE CUP \u00d835', seed: 'STANDARD 35 MM CLIP-ON \u00b7 INSET',
+    seed2: 'MCMASTER HALF-MORTISE 90\u00b0', seed2mcm: '15215A23',
+    seed2dims: { cupD: 1.38, cupZ: 0.43, armL: 2.25, armW: 0.78, leafT: 0.16, doorT: '0.593\u20130.859' } },
+  { id: 'peg', name: 'SHELF PEGS', on: 'SHELF PIN BORE \u00d85', seed: '5 MM STEEL PEG',
+    seed2: 'MCMASTER 3/16 SHELF SUPPORT', seed2mcm: '1741A25',
+    seed2dims: { pinD: 0.1875, pinL: 0.3125, w: 0.4375, d: 0.375 } },
+  { id: 'glide', name: 'FLOOR GLIDES', on: 'GLIDE BORE', seed: 'LEVELLING GLIDE M8',
+    seed2: 'NYLON MOUNT M6 \u00d7 25 \u00b7 \u00d830 BASE', seed2mcm: '2814K51',
+    seed2dims: { studL: 0.984, baseD: 1.181, baseH: 0.512, thread: 'M6 \u00d7 1' },
+    seed3: 'NYLON-BASE MOUNT M6 \u00d7 34 \u00b7 \u00d825 BASE', seed3mcm: '9538N14',
+    seed3dims: { studL: 1.339, baseD: 0.984, baseH: 0.433, thread: 'M6 \u00d7 1' } },
   { id: 'slide', name: 'DRAWER SLIDES', on: 'SLIDE SCREWS', seed: 'SIDE-MOUNT BALL BEARING', seed2: 'MCMASTER FULL-EXT BALL BEARING', seed2mcm: '11435A13',
     seed2dims: { len: 13.78, travel: 14.02, h: 1.79, stack: 0.5, screw: 'NO. 8', caseHoles: [0.42, 5.97, 10.7] } },
   { id: 'camnut', name: 'CAM NUTS', on: 'CAM BORE (FACE)', seed: 'CAM NUT \u00d820' },
   { id: 'campin', name: 'CAM SCREWS', on: 'PIN BORE (EDGE)', seed: 'CAM SCREW \u00d87' },
   { id: 'dowel', name: 'DOWELS', on: 'DOWEL BORE (EDGE)', seed: 'DOWEL 8 \u00d7 30 FLUTED' },
-  { id: 'insert', name: 'THREADED INSERTS', on: 'INSERT BORE', seed: null },
+  { id: 'insert', name: 'THREADED INSERTS', on: 'INSERT BORE', seed: 'MCMASTER M6 \u00d7 10 SOFTWOOD', seedmcm: '95596A205',
+    seeddims: { thread: 'M6 \u00d7 1', L: 0.394, bodyD: 0.492, drill: 0.358 },
+    seed2: 'MCMASTER M6 \u00d7 13 SOFTWOOD', seed2mcm: '95596A500',
+    seed2dims: { thread: 'M6 \u00d7 1', L: 0.512, bodyD: 0.487 } },
   { id: 'pull', name: 'HANDLES \u00b7 DOORS AND DRAWERS', on: 'PULL BORES', seed: 'WIRE PULL 128 MM CC' },
   { id: 'rodhold', name: 'CLOSET ROD HOLDERS', on: 'ROUTED POCKET', seed: 'STYLE A \u00b7 STADIUM', seed2: 'STYLE B \u00b7 ROUND CUP' },
   { id: 'rod', name: 'CLOSET RODS', on: 'THE HOLDERS', seed: 'ROD \u00d825 \u00b7 CUT TO LENGTH' }
 ];
+function hwDimsLine(d) { const o = [];
+  if (d.len) o.push(d.len + '\u2033 LONG'); if (d.h) o.push(d.h + '\u2033 RAIL');
+  if (d.cupD) o.push('CUP \u00d8' + d.cupD + '\u2033 \u00d7 ' + d.cupZ + '\u2033');
+  if (d.pinD) o.push('PIN \u00d8' + d.pinD + '\u2033 \u00d7 ' + d.pinL + '\u2033');
+  if (d.studL) o.push('STUD ' + d.thread + ' \u00d7 ' + d.studL + '\u2033 \u00b7 BASE \u00d8' + d.baseD + '\u2033');
+  if (d.L && d.thread) o.push(d.thread + ' \u00d7 ' + d.L + '\u2033' + (d.drill ? ' \u00b7 DRILL \u00d8' + d.drill + '\u2033' : ''));
+  if (d.screw) o.push(d.screw); if (d.doorT) o.push('DOORS ' + d.doorT + '\u2033');
+  return o.join(' \u00b7 ');
+}
 function hwModels(cat) {                                                       // the job's model list, seeded once
   M.hwModels = M.hwModels || {};
   if (!M.hwModels[cat]) { const c = HWCAT.find(q => q.id === cat);
-    M.hwModels[cat] = []; if (c && c.seed) M.hwModels[cat].push({ name: c.seed, mcm: '' });
-    if (c && c.seed2) M.hwModels[cat].push({ name: c.seed2, mcm: c.seed2mcm || '', dims: c.seed2dims || null }); }
+    M.hwModels[cat] = []; if (c && c.seed) M.hwModels[cat].push({ name: c.seed, mcm: c.seedmcm || '', dims: c.seeddims || null });
+    if (c && c.seed2) M.hwModels[cat].push({ name: c.seed2, mcm: c.seed2mcm || '', dims: c.seed2dims || null });
+    if (c && c.seed3) M.hwModels[cat].push({ name: c.seed3, mcm: c.seed3mcm || '', dims: c.seed3dims || null }); }
   return M.hwModels[cat];
 }
 function hwDefault(cat) { M.hwDefault = M.hwDefault || {}; return Math.min(M.hwDefault[cat] || 0, Math.max(0, hwModels(cat).length - 1)); }
@@ -3260,6 +3292,23 @@ function hwCounts(ps) {                                                        /
   n.pull = ps.filter(p => p.role === 'face' || p.name.startsWith('DOOR')).reduce((a, p) => a + (p.qty || 1), 0);
   return n;
 }
+const CYL_CACHE = {};
+function cylMesh(r, h, N) {                                                    // a capped cylinder: base at z=0, +Z up the axis
+  N = N || 18; const key = r + ':' + h + ':' + N;
+  if (CYL_CACHE[key]) return CYL_CACHE[key];
+  const v = [], f = [];
+  for (let i = 0; i < N; i++) { const a = 2 * Math.PI * i / N, x = r * Math.cos(a), y = r * Math.sin(a);
+    v.push(x, y, 0, x, y, h); }
+  v.push(0, 0, 0, 0, 0, h);
+  const C0 = 2 * N, C1 = 2 * N + 1;
+  for (let i = 0; i < N; i++) { const j = (i + 1) % N;
+    f.push(2 * i, 2 * j, 2 * i + 1, 2 * j, 2 * j + 1, 2 * i + 1);              // wall
+    f.push(C0, 2 * j, 2 * i);                                                  // base cap (facing -z)
+    f.push(C1, 2 * i + 1, 2 * j + 1); }                                        // top cap (facing +z)
+  return CYL_CACHE[key] = { v, f };
+}
+function pickDims(cat, idx) { const l = hwModels(cat), i = idx != null ? idx : hwDefault(cat);
+  return l[i] && l[i].dims ? l[i].dims : null; }
 function synthHardware(ps) {                                                   // library pieces set on their bores
   const out = [];
   const boxAt = (C, ex, ey, n, sx, sy, sIn, sOut) => {                         // a solid on the origin frame
@@ -3278,30 +3327,49 @@ function synthHardware(ps) {                                                   /
       pins.forEach(h => { const wz = toWorld(p, h.x, h.y, 'shown')[2];
         const key = Math.round(h.y * 4);
         if (!rows[key] || Math.abs(wz - zc) < Math.abs(rows[key].wz - zc)) rows[key] = { h, wz }; });
+      const pd = pickDims('peg', (M.bays[sh.forBay] || {}).pegModel);
       Object.values(rows).forEach(({ h, wz }) => { if (Math.abs(wz - zc) > 1.5) return;
         const C = toWorld(p, h.x, h.y, h.under ? 'opp' : 'shown');
         const n = h.under ? n0.map(v => -v) : n0;
-        out.push({ name: 'SHELF PEG', hardware: true, qty: 1, w: 0.2, h: 0.2, t: 0.55, hwKind: 'pin',
+        const outw2 = n;                                                        // the face's outward normal
+        if (pd && pd.pinD) {                                                    // the 1741A25: pin in the bore, ledge under the shelf
+          out.push({ name: 'SHELF PEG', hardware: true, qty: 1, w: pd.w, h: pd.d, t: pd.pinL, hwKind: 'pin',
+            mesh: { v: cylMesh(pd.pinD / 2, pd.pinL, 14).v, f: cylMesh(pd.pinD / 2, pd.pinL, 14).f,
+                    m: [f.ux, f.uy.map(v => -v), outw2.map(v => -v)], o: C.map((v, i) => v + outw2[i] * 0.008) } });
+          out.push({ name: 'SHELF PEG', hardware: true, qty: 1, w: pd.w, h: pd.d, t: 0.08, hwKind: 'pin',
+            box: boxAt(C, f.ux, f.uy, n, pd.w, pd.d, 0, 0.09) });
+        } else out.push({ name: 'SHELF PEG', hardware: true, qty: 1, w: 0.2, h: 0.2, t: 0.55, hwKind: 'pin',
           box: boxAt(C, f.ux, f.uy, n, 0.2, 0.2, 0.3, 0.31) }); }); }); });
   ps.forEach(p => { if (!p.frame) return; const f = p.frame;
     const n0 = [0, 0, 0]; n0[f.ax] = Math.sign(f.shown - f.opp) || 1;
     (p.holes || []).forEach(h => {
-      if (h.type === 'GLIDE' && h.edge) {                                       // a puck under the side's bottom edge
-        const C = edgeHoleWorld(p, h);
-        out.push({ name: 'FLOOR GLIDE', hardware: true, qty: 1, w: 0.9, h: 0.9, t: 0.35, hwKind: 'glide',
-          box: { min: [C[0] - 0.45, C[1] - 0.45, C[2] - 0.35], max: [C[0] + 0.45, C[1] + 0.45, C[2]] } }); return; }
-      if (h.type === 'GLIDE' && !h.edge) {                                      // bolted under the bottom
-        const C = toWorld(p, h.x, h.y, 'opp');
-        out.push({ name: 'FLOOR GLIDE', hardware: true, qty: 1, w: 0.9, h: 0.9, t: 0.9, hwKind: 'glide',
-          box: { min: [C[0] - 0.45, C[1] - 0.45, C[2] - 0.9], max: [C[0] + 0.45, C[1] + 0.45, C[2]] } }); return; }
-      if (h.type === 'HINGE' && p.name.startsWith('DOOR')) {                    // cup + arm
+      if (h.type === 'GLIDE') {                                                 // stud up into the bore, base under the case
+        const C = h.edge ? edgeHoleWorld(p, h) : toWorld(p, h.x, h.y, 'opp');
+        C[2] = h.edge ? p.box.min[2] : C[2];                                     // the bore mouth on the underside
+        const gd = pickDims('glide', M.glideModel);
+        if (gd && gd.studL) {
+          const up = [0, 0, 1], sm3 = cylMesh(0.118, gd.studL, 12), bm = cylMesh(gd.baseD / 2, gd.baseH, 20);
+          out.push({ name: 'FLOOR GLIDE', hardware: true, qty: 1, w: gd.baseD, h: gd.baseD, t: gd.baseH, hwKind: 'glide',
+            mesh: { v: sm3.v, f: sm3.f, m: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], o: [C[0], C[1], C[2] - 0.01] } });
+          out.push({ name: 'FLOOR GLIDE', hardware: true, qty: 1, w: gd.baseD, h: gd.baseD, t: gd.baseH, hwKind: 'glide',
+            mesh: { v: bm.v, f: bm.f, m: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], o: [C[0], C[1], C[2] - gd.baseH] } });
+        } else out.push({ name: 'FLOOR GLIDE', hardware: true, qty: 1, w: 0.9, h: 0.9, t: 0.9, hwKind: 'glide',
+          box: { min: [C[0] - 0.45, C[1] - 0.45, C[2] - (h.edge ? 0.35 : 0.9)], max: [C[0] + 0.45, C[1] + 0.45, C[2]] } });
+        return; }
+      if (h.type === 'HINGE' && p.name.startsWith('DOOR')) {                    // cup + arm, sized by the picked model
         const inFace = h.under ? 'opp' : 'shown';
         const n = h.under ? n0.map(v => -v) : n0;
         const C = toWorld(p, h.x, h.y, inFace);
         const dirE = (p.hingeEdge === 'L' ? -1 : 1), ex = f.ux.map(v => v * dirE);
-        out.push({ name: 'HINGE \u00b7 ' + ((p.hingeKind || 'FULL OVERLAY').split(' (')[0]), hardware: true, qty: 1, w: 2.3, h: 0.75, t: 0.55, hwKind: 'hinge',
-          boxes: [boxAt(C, f.ux, f.uy, n, h.d, h.d, 0.5, 0.06),
-                  boxAt([0, 1, 2].map(i => C[i] + ex[i] * (1.15 - h.d / 2)), ex, f.uy, n, 2.3, 0.75, 0, 0.16)] }); return; }
+        const catH = (p.hingeKind || '').indexOf('HALF') === 0 ? 'hingehalf' : (p.hingeKind || '').indexOf('INSET') === 0 ? 'hingeinset' : 'hingefull';
+        const hd = pickDims(catH, (M.bays[p.doorFor] || {}).hingeModel);
+        const nm2 = 'HINGE \u00b7 ' + ((p.hingeKind || 'FULL OVERLAY').split(' (')[0]);
+        const cupZ2 = hd ? hd.cupZ : 0.5, armL2 = hd ? hd.armL : 2.3, armW2 = hd ? hd.armW : 0.75, leafT = hd ? hd.leafT : 0.16;
+        const cm2b = cylMesh(h.d / 2, cupZ2 + 0.05, 20);
+        out.push({ name: nm2, hardware: true, qty: 1, w: armL2, h: armW2, t: cupZ2, hwKind: 'hinge',
+          mesh: { v: cm2b.v, f: cm2b.f, m: [f.ux, f.uy.map(v => -v), n.map(v => -v)], o: C.map((v, i) => v + n[i] * 0.045) } });
+        out.push({ name: nm2, hardware: true, qty: 1, w: armL2, h: armW2, t: leafT, hwKind: 'hinge',
+          box: boxAt([0, 1, 2].map(i => C[i] + ex[i] * (armL2 / 2 - h.d / 2)), ex, f.uy, n, armL2, armW2, 0, leafT) }); return; }
       if (h.type === 'CAM' && !h.edge) {                                        // v1's modelled nut, set in its bore
         const C = toWorld(p, h.x, h.y, h.under ? 'opp' : 'shown');
         const outw = h.under ? n0.map(v => -v) : n0;                             // the drilled face's outward normal
@@ -3318,17 +3386,18 @@ function daeText(ps, k, units, o3) { o3 = o3 || {};
   else if (o3.hw) ps = ps.concat(synthHardware(ps));
   const geos = [], libs = [], nodes = []; let gi = 0;
   const S = k;                                                                 // unit scale on every coordinate
-  let camGeo = null;                                                           // one shared geometry for every modelled nut
+  const meshGeo = new Map();                                                   // one geometry per distinct hardware mesh
   ps.forEach(p => {
-    if (p.mesh) {                                                              // a modelled hardware mesh (v1's cam nut)
-      if (!camGeo) { camGeo = 'g' + (gi++);
+    if (p.mesh) {
+      let id2 = meshGeo.get(p.mesh.v);
+      if (!id2) { id2 = 'g' + (gi++); meshGeo.set(p.mesh.v, id2);
         const sm2 = smoothNormals(p.mesh.v.map(v => v * S), p.mesh.f, 40), P2 = [];
         for (let i = 0; i < sm2.tri.length; i++) P2.push(sm2.tri[i], sm2.tri[i]);
-        geos.push(`<geometry id="${camGeo}"><mesh><source id="${camGeo}p"><float_array id="${camGeo}a" count="${sm2.pos.length}">${sm2.pos.map(v=>+v.toFixed(5)).join(' ')}</float_array><technique_common><accessor source="#${camGeo}a" count="${sm2.pos.length/3}" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common></source><source id="${camGeo}n"><float_array id="${camGeo}na" count="${sm2.nrm.length}">${sm2.nrm.join(' ')}</float_array><technique_common><accessor source="#${camGeo}na" count="${sm2.nrm.length/3}" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common></source><vertices id="${camGeo}v"><input semantic="POSITION" source="#${camGeo}p"/></vertices><triangles count="${sm2.tri.length/3}" material="metal"><input semantic="VERTEX" source="#${camGeo}v" offset="0"/><input semantic="NORMAL" source="#${camGeo}n" offset="1"/><p>${P2.join(' ')}</p></triangles></mesh></geometry>`);
-        libs.push('<node id="lib_' + camGeo + '" name="CAM NUT" type="NODE"><instance_geometry url="#' + camGeo + '"><bind_material><technique_common><instance_material symbol="metal" target="#matMetal"/></technique_common></bind_material></instance_geometry></node>'); }
+        geos.push(`<geometry id="${id2}"><mesh><source id="${id2}p"><float_array id="${id2}a" count="${sm2.pos.length}">${sm2.pos.map(v=>+v.toFixed(5)).join(' ')}</float_array><technique_common><accessor source="#${id2}a" count="${sm2.pos.length/3}" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common></source><source id="${id2}n"><float_array id="${id2}na" count="${sm2.nrm.length}">${sm2.nrm.join(' ')}</float_array><technique_common><accessor source="#${id2}na" count="${sm2.nrm.length/3}" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common></source><vertices id="${id2}v"><input semantic="POSITION" source="#${id2}p"/></vertices><triangles count="${sm2.tri.length/3}" material="metal"><input semantic="VERTEX" source="#${id2}v" offset="0"/><input semantic="NORMAL" source="#${id2}n" offset="1"/><p>${P2.join(' ')}</p></triangles></mesh></geometry>`);
+        libs.push('<node id="lib_' + id2 + '" name="' + (p.name || 'HARDWARE') + '" type="NODE"><instance_geometry url="#' + id2 + '"><bind_material><technique_common><instance_material symbol="metal" target="#matMetal"/></technique_common></bind_material></instance_geometry></node>'); }
       const m2 = p.mesh.m, o2 = p.mesh.o;
       const Mx2 = [m2[0][0], m2[1][0], m2[2][0], o2[0] * S, m2[0][1], m2[1][1], m2[2][1], o2[1] * S, m2[0][2], m2[1][2], m2[2][2], o2[2] * S, 0, 0, 0, 1];
-      nodes.push('<node id="n' + (gi++) + 'cam" name="CAM NUT" type="NODE"><matrix sid="transform">' + Mx2.map(v => +v.toFixed(6)).join(' ') + '</matrix><instance_node url="#lib_' + camGeo + '"/></node>');
+      nodes.push('<node id="n' + (gi++) + 'm" name="' + (p.name || 'HARDWARE') + '" type="NODE"><matrix sid="transform">' + Mx2.map(v => +v.toFixed(6)).join(' ') + '</matrix><instance_node url="#lib_' + id2 + '"/></node>');
       return; }
     const boxes = (p.boxes || (p.box && p.box.min ? [p.box] : [])).filter(Boolean); if (!boxes.length) return;
     const mesh = daePanelMesh(p), id = 'g' + (gi++);
@@ -3402,7 +3471,7 @@ function drawOpts() {
           '<span style="color:' + (n[c.id] ? 'var(--amber)' : 'var(--mute)') + ';font-size:10px">' + (n[c.id] ? n[c.id] + ' IN THIS CASE' : '\u2014') + '</span></div>' +
           (list.length ? '<table style="width:100%;border-collapse:collapse;font-size:10.5px"><tbody>' + list.map((m2, i2) =>
             '<tr><td style="width:26px;padding:3px 4px"><button class="btn sm' + (i2 === def ? ' on' : '') + '" data-hwdef="' + c.id + ':' + i2 + '" title="Make this the default">' + (i2 === def ? '\u25CF' : '\u25CB') + '</button></td>' +
-            '<td style="color:var(--ink);padding:3px 4px">' + m2.name + (m2.dims ? ' <span style="color:var(--mute);font-size:9px">' + m2.dims.len + '\u2033 \u00b7 ' + m2.dims.h + '\u2033 \u00b7 ' + m2.dims.screw + '</span>' : '') + '</td>' +
+            '<td style="color:var(--ink);padding:3px 4px">' + m2.name + (m2.dims ? ' <span style="color:var(--mute);font-size:9px">' + hwDimsLine(m2.dims) + '</span>' : '') + '</td>' +
             '<td style="width:120px"><input data-hwmc="' + c.id + ':' + i2 + '" value="' + (m2.mcm || '') + '" placeholder="MCMASTER #" style="width:104px;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--ink);font:inherit;padding:2px 5px"></td>' +
             '<td style="width:70px;text-align:right;color:var(--mute);font-size:10px">' + ((modelUse[c.id] || {})[i2] ? (modelUse[c.id] || {})[i2] + ' USED' : '') + '</td>' +
             '<td style="width:30px">' + (list.length > 1 ? '<button class="btn sm" data-hwrm="' + c.id + ':' + i2 + '">\u00d7</button>' : '') + '</td></tr>').join('') + '</tbody></table>' :
@@ -3439,8 +3508,8 @@ $('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
 $('newBtn').onclick = () => { M = newCase(); HIST.past = []; HIST.future = []; HIST.last = null; UI.sc = null; UI.sel = { kind: 'case' }; $('preset').value = ''; $('job').value = M.job; render(); };
 $('job').onchange = () => { M.job = $('job').value; };
 $('saveBtn').onclick = () => {
-  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.34', saved: new Date().toISOString(), model: M };
-  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.34'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
+  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.35', saved: new Date().toISOString(), model: M };
+  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.35'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
 $('loadBtn').onclick = () => $('loadFile').click();
 $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
   f.text().then(t => { try { const d = JSON.parse(t); if (d.format !== 'CASEMAKER2') throw new Error('not a CASEMAKER 2 file');
@@ -3451,7 +3520,7 @@ $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
    Served over http: the page re-reads itself every minute and compares build stamps.
    Opened from a file: the browser blocks reading files, so tabs tell each other instead -
    opening a newer build in any tab tells every older tab on this machine. */
-const BUILD = '2026-09-03.34';
+const BUILD = '2026-09-03.35';
 const newer = (a, b) => { if (!a || !b) return false; const [da, na] = a.split('.'), [db, nb] = b.split('.');
   return da > db || (da === db && (+na || 0) > (+nb || 0)); };
 function showUpdate(build) { $('updateT').textContent = 'A NEW BUILD OF CASEMAKER IS AVAILABLE · ' + build + ' (YOU ARE ON ' + BUILD + ')'; $('update').classList.add('show'); }
