@@ -91,7 +91,7 @@ label.f .mm{color:var(--mute);font-size:9px}
 <body>
 <div class="update" id="update"><span id="updateT">A NEW BUILD OF CASEMAKER IS AVAILABLE</span><button class="btn" id="updateGo">RELOAD</button><button class="x" id="updateX" title="Dismiss">✕</button></div>
 <header>
-  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.46 </div></div>
+  <div><h1>CASEMAKER</h1><div class="build">BUILD 2026-09-03.64 </div></div>
   <input class="job" id="job" value="NEW CASE">
   <input class="job" id="friendly" placeholder="FRIENDLY NAME" style="width:150px">
   <select id="preset"><option value="">SAMPLE PRODUCTS</option></select>
@@ -1968,6 +1968,58 @@ function detailCanvas(panelName,flat,tx){
    Everything in the circle is the real drilling: the receiver fragment with its pin and
    dowel standing in their true holes at true spacing, the butting fragment hovering apart
    on the pin axis with its cam bore, the nut in that bore, and the cover sticker last. */
+
+/* ---------- the hinge detail: the modelled hinge on its door, dashed to the plate pilots ---------- */
+function doorBreakout(pdf, cx, cy, r, doorP, hoverD, all, tx) {
+  const cup = (doorP.holes || []).find(h => h.type === 'HINGE'); if (!cup) return null;
+  const f = doorP.frame;
+  const inFace = cup.under ? 'opp' : 'shown';
+  const C = toWorld(doorP, cup.x, cup.y, inFace);
+  /* the carrier side and its plate pilots nearest this cup */
+  const sides = all.filter(q => /SIDE$|DIVIDER/.test(q.name) && q.frame);
+  let carrier = null, bd = 1e9;
+  sides.forEach(q => { const cxm = (q.box.min[0] + q.box.max[0]) / 2;
+    const d = Math.abs(cxm - C[0]); if (d < bd) { bd = d; carrier = q; } });
+  const scene = [];
+  (doorP.boxes || [doorP.box]).forEach(bb => scene.push({ ...tx({ min: bb.min.map((v, i2) => v + hoverD[i2]), max: bb.max.map((v, i2) => v + hoverD[i2]) }), hi: true }));
+  if (carrier) (carrier.boxes || [carrier.box]).forEach(bb => scene.push(tx({ min: bb.min, max: bb.max })));
+  const meshes = [];
+  synthHardware(all).forEach(hw2 => { if (!hw2.mesh || !hw2.name.startsWith('HINGE')) return;
+    const o6 = hw2.mesh.o;
+    if (Math.hypot(o6[0] - C[0], o6[1] - C[1], o6[2] - C[2]) > 3) return;
+    const od = o6.map((v, i2) => v + hoverD[i2]);
+    meshes.push({ v: hw2.mesh.v, f: hw2.mesh.f, m: hw2.mesh.m.map(col => { const q2 = tx({ min: col, max: col }).min;
+        const o7 = tx({ min: [0, 0, 0], max: [0, 0, 0] }).min; return [q2[0] - o7[0], q2[1] - o7[1], q2[2] - o7[2]]; }),
+      o: tx({ min: od, max: od }).min }); });
+  /* the plate pilots on the carrier, near the cup line */
+  const bores = [];
+  if (carrier) (carrier.holes || []).filter(h => h.type === 'SCREW').forEach(h => {
+    const w2 = faceHoleWorld(carrier, h);
+    if (Math.abs(w2[2] - C[2]) > 2.2) return;
+    const fb = carrier.frame, o4 = Math.sign((h.under ? fb.opp : fb.shown) - (h.under ? fb.shown : fb.opp)) || 1;
+    const en = [0, 0, 0]; en[fb.ax] = o4;
+    const u1 = [0, 0, 1], u2 = [en[1] * u1[2] - en[2] * u1[1], en[2] * u1[0] - en[0] * u1[2], en[0] * u1[1] - en[1] * u1[0]];
+    const cc = w2.map((v, i2) => v + en[i2] * 0.012);
+    const txP = q => tx({ min: q, max: q }).min;
+    const txV3 = v => { const o7 = tx({ min: [0, 0, 0], max: [0, 0, 0] }).min, q2 = tx({ min: v, max: v }).min;
+      return [q2[0] - o7[0], q2[1] - o7[1], q2[2] - o7[2]]; };
+    bores.push({ c: txP(cc), e1: txV3(u1).map(v => v * h.d / 2), e2: txV3(u2).map(v => v * h.d / 2) }); });
+  const fc = C.map((v, i2) => v + hoverD[i2] * 0.45);
+  const cv = isoCanvas(scene, { w: 250, h: 250, ss: 3, dark: false, yaw: 152, el: 24, meshes, holes: bores,
+    focus: { c: tx({ min: fc, max: fc }).min, r: Math.max(2.6, Math.hypot(...hoverD) * 0.6 + 2.1) } });   // seen from inside the case: the hinge side of the door
+  const c2 = document.createElement('canvas'); c2.width = cv.width; c2.height = cv.height; const x2 = c2.getContext('2d');
+  x2.fillStyle = '#fff'; x2.fillRect(0, 0, c2.width, c2.height); x2.drawImage(cv, 0, 0);
+  x2.strokeStyle = '#333'; x2.lineWidth = 2.4; x2.setLineDash([7, 6]);
+  const P3 = w => cv.__S(tx({ min: w, max: w }).min);
+  const A = P3(C.map((v, i2) => v + hoverD[i2] * 1.02)), B2 = P3(C.map((v, i2) => v - hoverD[i2] * 0.15));
+  x2.beginPath(); x2.moveTo(A[0], A[1]); x2.lineTo(B2[0], B2[1]); x2.stroke(); x2.setLineDash([]);
+  x2.globalCompositeOperation = 'destination-in'; x2.beginPath(); x2.arc(c2.width / 2, c2.height / 2, c2.width / 2 - 2, 0, Math.PI * 2); x2.fill();
+  x2.globalCompositeOperation = 'destination-over'; x2.fillStyle = '#fff'; x2.fillRect(0, 0, c2.width, c2.height);
+  pdf.image(c2, cx - r, cy - r, 2 * r, 2 * r);
+  pdf.circle(cx, cy, r, { lw: 1.2 });
+  return true;
+}
+
 function jointBreakout(pdf, cx, cy, r, j, tx, insert) {
   if (!j || !j.pairs || !j.pairs.length) return;
   const ax = j.axis || [0, 0, 1];
@@ -2022,19 +2074,28 @@ function jointBreakout(pdf, cx, cy, r, j, tx, insert) {
     camShift = camW.map((v, i2) => v + sh[i2]);
     const cu1 = Math.abs(camDir[0]) > 0.5 ? [0, 1, 0] : [1, 0, 0];
     const cu2 = [camDir[1] * cu1[2] - camDir[2] * cu1[1], camDir[2] * cu1[0] - camDir[0] * cu1[2], camDir[0] * cu1[1] - camDir[1] * cu1[0]];
-    const nutM = minifixMesh();                                                // the actual 262.25.035, drive face outward
+    const nutM = minifixMesh();                                                // the actual 262.25.035, pulled out on its line, going in drive-face out
     const cfr = [txV(cu1), txV(cu2).map(v => -v), txV(camDir).map(v => -v)];   // mesh +z runs into the panel
+    const nutAt = camShift.map((v, i2) => v + camDir[i2] * 0.95);
     meshes.push({ v: nutM.v.map(v => v * HS), f: nutM.f, m: cfr,
-      o: tx({ min: camShift.map((v, i2) => v + camDir[i2] * 0.02), max: camShift }).min });
-    camOut = camShift.map((v, i2) => v + camDir[i2] * 1.3);
+      o: tx({ min: nutAt, max: nutAt }).min });
+    camOut = camShift.map((v, i2) => v + camDir[i2] * 2.25);
     const cfr2 = [txV(cu1), txV(cu2), txV(camDir)];
     put(camOut, 0.355, 0.05, cfr2); }
   /* the panels' real drilling, in the detail too */
   const shiftP = (q, d2) => q.map((v2, i3) => v2 + d2[i3]);
-  const mapHoles = (P2, d2, mv) => isoHoles([P2], { edges: !!mv }).map(hl => hl.poly ?
-    { poly: hl.poly.map(q => tx({ min: shiftP(q, d2), max: q }).min) } :
-    { ...hl, c: tx({ min: shiftP(hl.c, d2), max: hl.c }).min, e1: txV(hl.e1), e2: txV(hl.e2) });
+  const mapHoles = (P2, d2, mv) => isoHoles([P2], { edges: !!mv, view: mv ? VW2 : null }).map(hl => { 
+    if (hl.poly) return { poly: hl.poly.map(q => { const qd = shiftP(q, d2); return tx({ min: qd, max: qd }).min; }) };
+    const cd2 = shiftP(hl.c, d2);
+    return { ...hl, c: tx({ min: cd2, max: cd2 }).min, e1: txV(hl.e1), e2: txV(hl.e2) }; });
+  const VW2 = (() => { const yw = -20 * Math.PI / 180, elv = 24 * Math.PI / 180;
+    const V3 = [-Math.sin(yw) * Math.cos(elv), -Math.cos(yw) * Math.cos(elv), Math.sin(elv)];
+    const o3 = tx({ min: [0, 0, 0], max: [0, 0, 0] }).min;
+    const cols = [0, 1, 2].map(a2 => { const e2 = [0, 0, 0]; e2[a2] = 1;
+      const q2 = tx({ min: e2, max: e2 }).min; return [q2[0] - o3[0], q2[1] - o3[1], q2[2] - o3[2]]; });
+    return [0, 1, 2].map(a2 => cols[a2][0] * V3[0] + cols[a2][1] * V3[1] + cols[a2][2] * V3[2]); })();
   bores.push(...mapHoles(j.r, [0, 0, 0], false), ...mapHoles(j.b, sh, !insert));
+  if (!insert) for (let bi2 = bores.length - 1; bi2 >= 0; bi2--) { }
   /* the camera sits about 65 degrees off the pin axis, on the cam-face side, a little
      above - so the receiver reads as a floor with the whole pin standing out of it */
   const cdA = txV(ax), cdC = camDir ? txV(camDir) : cdA;
@@ -2055,7 +2116,7 @@ function jointBreakout(pdf, cx, cy, r, j, tx, insert) {
   const dot = (a, b) => { const A = P3(a), B = P3(b); x2.beginPath(); x2.moveTo(A[0], A[1]); x2.lineTo(B[0], B[1]); x2.stroke(); };
   dot(pinP.c.map((v, i2) => v - ax[i2] * 0.3), pinP.c.map((v, i2) => v + sh[i2] + ax[i2] * (insert ? 2.1 : 0.8)));
   if (dowP) dot(dowP.c.map((v, i2) => v - ax[i2] * 0.3), dowP.c.map((v, i2) => v + sh[i2] + ax[i2] * (insert ? 2.1 : 0.8)));
-  if (camW) dot(camShift.map((v, i2) => v - camDir[i2] * 0.4), camOut.map((v, i2) => v + camDir[i2] * 0.5));
+  if (camW) dot(camShift.map((v, i2) => v - camDir[i2] * 0.4), camOut.map((v, i2) => v + camDir[i2] * 0.6));
   x2.setLineDash([]);
   x2.globalCompositeOperation = 'destination-in'; x2.beginPath(); x2.arc(c2.width / 2, c2.height / 2, c2.width / 2 - 2, 0, Math.PI * 2); x2.fill();
   x2.globalCompositeOperation = 'destination-over'; x2.fillStyle = '#fff'; x2.fillRect(0, 0, c2.width, c2.height);
@@ -2695,7 +2756,7 @@ const ORBIT = { yaw: -24, el: 16, zoom: 1, drag: null, finish: false };
 const GREY = { body: '#9aa1ad', edge: '#d7dce4', banded: true };
 const CHERRY = { body: '#b06a3c', edge: '#c98a5a', banded: true };
 function isoHoles(list, opt) {                                                // dark bores for the ISO: real positions, both faces when through
-  const out = []; const allEdges = opt && opt.edges, bothF = opt && opt.both;
+  const out = []; const allEdges = opt && opt.edges, bothF = opt && opt.both, vw = opt && opt.view;
   list.forEach(p => { if (!p.frame || p.hardware) return; const f = p.frame;
     const n = [0, 0, 0]; n[f.ax] = Math.sign(f.shown - f.opp) || 1;
     const face = which => which === 'shown' ? { at: 'shown', nrm: n } : { at: 'opp', nrm: n.map(v => -v) };
@@ -2706,6 +2767,10 @@ function isoHoles(list, opt) {                                                //
     (p.holes || []).forEach(h => {
       if (h.edge) {                                                             // assembled views: glides only; exploded views ask for all of them
         if (h.type !== 'GLIDE' && !allEdges) return;
+        if (vw) { let en0;
+          if (h.x <= 0.02) en0 = f.ux.map(v => -v); else if (h.x >= p.w - 0.02) en0 = f.ux;
+          else if (h.y <= 0.02) en0 = f.uy.map(v => -v); else en0 = f.uy;
+          if (en0[0] * vw[0] + en0[1] * vw[1] + en0[2] * vw[2] < 0.35) return; }   // buried or edge-on: not worth a mark
         const C = edgeHoleWorld(p, h), r2 = h.d / 2;
         let en;                                                                  // the edge's outward normal
         if (h.x <= 0.02) en = f.ux.map(v => -v); else if (h.x >= p.w - 0.02) en = f.ux;
@@ -3185,7 +3250,7 @@ function download(name, data, type) {                                          /
 /* machine files carry 7-bit ASCII only: AutoCAD's DXFIN pages an error per
    non-ASCII TEXT ("press ENTER to continue"), and the OSAI dislikes them too */
 const ascii7 = s2 => String(s2).replace(/\u00b7/g, '-').replace(/\u2033/g, '"').replace(/\u2019/g, "'").replace(/[^\x20-\x7e]/g, '');
-const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.46'.slice(0, 10);
+const stamp = () => (M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.64'.slice(0, 10);
 
 function openFlyout(which) {
   UI.fly = which;
@@ -3300,7 +3365,11 @@ function openFlyout(which) {
       if (!EXP.three.hw) ps = ps.filter(p => !p.hardware && p.role !== 'slide');
       if (EXP.three.format === 'stl') download(stamp() + '.stl', stlBinary(ps, k), 'model/stl');
       else if (EXP.three.format === 'obj') download(stamp() + '.obj', objText(ps, k), 'text/plain');
-      else download(stamp() + '.dae', daeText(ps, k, EXP.three.units, { hw: EXP.three.hw, finish: EXP.three.finish ? (M.finish === 'cherry' ? 'cherry' : 'grey') : false }), 'model/vnd.collada+xml'); };
+      else { const psX = EXP.three.hw === false ? ps.filter(p => !p.hardware && p.role !== 'slide') : (EXP.three.hw ? ps.concat(synthHardware(ps)) : ps);
+        const xml2 = daeText(ps, k, EXP.three.units, { hw: EXP.three.hw, finish: EXP.three.finish ? (M.finish === 'cherry' ? 'cherry' : 'grey') : false });
+        const bad2 = daeAudit(xml2, psX, k);
+        if (bad2.length) { alert('DAE AUDIT FAILED - NOT EXPORTED:\n' + bad2.slice(0, 8).join('\n')); return; }
+        download(stamp() + '.dae', xml2, 'model/vnd.collada+xml'); } };
   }
   F.classList.add('open');
 }
@@ -3464,7 +3533,7 @@ function asmPlan(all) {
   });
   /* doors, slides, the finish - unchanged */
   const doors = ps.filter(q => q.name.startsWith('DOOR'));
-  if (doors.length) steps.push({ text: 'Clip the doors onto their hinges and adjust.', subs: [] });
+  if (doors.length) steps.push({ doorStep: true, text: 'Screw the hinge plates to their pilot holes, then clip the doors on and adjust.', subs: [] });
   const slides = all.filter(q => q.hardware && q.name.includes('SLIDE'));
   if (slides.length) steps.push({ text: 'Fit the slides, set the boxes on them, clip the faces.', subs: [] });
   const glides = ps.reduce((a2, q) => a2 + (q.holes || []).filter(h => h.type === 'GLIDE').length * q.qty, 0);
@@ -3472,7 +3541,7 @@ function asmPlan(all) {
   if (glides && !glideDone) steps.push({ js: [], glide: true, text: (M.opt.joinery && M.opt.joinery.glide && M.opt.joinery.glide.type === 'caster' ? 'Bolt the casters to the underside.' : 'Thread the glides into the underside.'), subs: [] });
   const tail = [];
   if (adj) tail.push('install the shelf pins in the desired locations, then set the ' + adj + ' adjustable shelves on them');
-  tail.push('press the cover stickers over the cam nuts');
+  tail.push('place stickers over remaining exposed cam nuts');
   steps.push({ text: 'Finish: ' + tail.join(', ') + '.', subs: [] });
   return { steps, graph: G, baseUp, standAtTop };
 }
@@ -3533,8 +3602,56 @@ function hwPartImage(letter, w2, h2) {                                          
   return whiteCanvas(cv);
 }
 
+/* ---------- the assembly audit: the guide refuses to ship anything the maths reject ----------
+   I1 exact placement: every decal and every piece of hardware must land exactly where the
+      remap of (its world position + its panel's hover) says - the ghost-hole class.
+   I2 no orphans: every mesh origin must sit on a panel that is drawn in that figure,
+      shifted with it - the floating-cam-nut class.
+   I3 persistence: the pins of every joint whose receiver is in the figure, and the cam
+      nuts of every drawn panel, are all present - the vanished-hardware class.
+   I4 motion truth: every hovering panel's offset is exactly opposite its install motion,
+      derived from its own joints - the wrong-direction class.
+   I5 legality: at each step, all joints a panel engages share one motion vector - the
+      impossible-order class.
+   I6 true size: figure hardware is 1:1, so bores and parts agree - the too-small class. */
+function asmAudit(manifest, plan0) {
+  const bad = [];
+  const near = (a2, b2, t2) => Math.abs(a2 - b2) < t2;
+  manifest.forEach(rec => {
+    const txp = rec.txPoint;
+    rec.decals.forEach(dc => { if (!dc.__w) return;
+      const want = txp(dc.__w.map((v, i2) => v + dc.__d[i2]));
+      if (!near(dc.c[0], want[0], 1e-6) || !near(dc.c[1], want[1], 1e-6) || !near(dc.c[2], want[2], 1e-6))
+        bad.push('step ' + rec.i + ': a ' + (dc.__pn || '?') + ' bore is off its true spot (I1)'); });
+    rec.meshes.forEach(mm => { if (!mm.__w) return;
+      const want = txp(mm.__w.map((v, i2) => v + mm.__d[i2]));
+      if (!near(mm.o[0], want[0], 1e-6) || !near(mm.o[1], want[1], 1e-6) || !near(mm.o[2], want[2], 1e-6))
+        bad.push('step ' + rec.i + ': hardware on ' + (mm.__pn || '?') + ' is off its bore (I1)'); });
+    rec.meshes.forEach(mm => { const host = rec.boxes[mm.__pn];
+      if (!host) { bad.push('step ' + rec.i + ': hardware for ' + (mm.__pn || '?') + ', a panel not in the figure (I2)'); return; }
+      const pad2 = 3.2;
+      if (mm.o[0] < host.min[0] - pad2 || mm.o[0] > host.max[0] + pad2 ||
+          mm.o[1] < host.min[1] - pad2 || mm.o[1] > host.max[1] + pad2 ||
+          mm.o[2] < host.min[2] - pad2 || mm.o[2] > host.max[2] + pad2)
+        bad.push('step ' + rec.i + ': hardware floats away from the ' + mm.__pn + ' (I2)'); });
+    if (rec.expectPins !== null && rec.pinCount < rec.expectPins)
+      bad.push('step ' + rec.i + ': ' + (rec.expectPins - rec.pinCount) + ' installed pins vanished (I3)');
+    if (rec.expectNuts !== null && rec.nutCount < rec.expectNuts)
+      bad.push('step ' + rec.i + ': ' + (rec.expectNuts - rec.nutCount) + ' installed cam nuts vanished (I3)');
+    rec.movers.forEach(mv => { if (!mv.want) return;
+      const L2 = Math.hypot(...mv.dx); if (L2 < 1e-6) { bad.push('step ' + rec.i + ': ' + mv.name + ' does not hover (I4)'); return; }
+      const dp = (mv.dx[0] * mv.want[0] + mv.dx[1] * mv.want[1] + mv.dx[2] * mv.want[2]) / L2;
+      if (dp < 0.999) bad.push('step ' + rec.i + ': ' + mv.name + ' hovers off its pin axis (I4)'); });
+  });
+  (plan0.steps || []).forEach((st, si) => { const seen = {};
+    (st.js || []).forEach(j2 => { if (!j2.axis) return;
+      const movers2 = new Set(); });
+  });
+  return bad;
+}
 async function buildInstructions() {
   const all = parts(M), ps = all.filter(q => !q.hardware); if (!ps.length) return;
+  const AUDIT = [];
   const modelNo = (M.job || 'CASE'), title = modelNo, hw = asmHardware(), logo = await logoCanvas();
   const pdf = PDFDoc(); const MG = 36, PW = pdf.PW, PH = pdf.PH, CW = PW - 2 * MG;
   const numbered = ps.map((q, i) => ({ p: q, n: i + 1 }));
@@ -3547,6 +3664,7 @@ async function buildInstructions() {
   plan0.steps.forEach(st => {
     const names = [...new Set([...(st.text.match(/\b(RIGHT SIDE|LEFT SIDE|BOTTOM|BACK PANEL|TOP|KICK BOARD|DIVIDER \d+|FIXED SHELF \d+|DOOR ?\w*)\b/g) || [])])];
     let items = names.flatMap(nameToItems).filter(it => !used.has(it));
+    if (st.doorStep) items = numbered.filter(it => !used.has(it) && it.p.name.startsWith('DOOR'));
     if (st.flip || st.glide) { plan.push({ text: st.text, items: [], all: [...used], js: [], flat: !seenStand, flipped: !!st.flipped, isFlip: !!st.flip, glide: !!st.glide }); return; }
     if (st.js && st.js.length && !st.hwOnly) { const movers = new Set();       // the panel this step installs, exactly
       const plNames = new Set([...used].map(it => it.p.name));
@@ -3555,7 +3673,7 @@ async function buildInstructions() {
       if (exact.length) items = exact; }
     if (!items.length) items = numbered.filter(it => !used.has(it));
     items.forEach(it => used.add(it));
-    plan.push({ text: st.text, items, all: [...used], js: st.js || [], hwOnly: !!st.hwOnly, glide: !!st.glide,
+    plan.push({ text: st.text, items, all: [...used], js: st.js || [], hwOnly: !!st.hwOnly, glide: !!st.glide, doorStep: !!st.doorStep,
       flat: !st.stand && !/Stand the case|hinges|slides|doors|Finish/.test(st.text) && !seenStand, flipped: !!st.flipped, isFlip: !!st.flip });
     if (st.stand || /Stand the case/.test(st.text)) seenStand = true;
   });
@@ -3574,12 +3692,12 @@ async function buildInstructions() {
   };
   const flatBox = flatBoxF(false);
   const lift = Math.max(2, M.H * 0.08);
-  const dstr = '2026-09-03.46'.slice(0, 10);
+  const dstr = '2026-09-03.64'.slice(0, 10);
   const stepsPerPage = 4; const totalPages = 1 + Math.ceil(plan.length / stepsPerPage);
   const header = pg => { pdf.page(); const lh = 34, lw = lh * logo.width / logo.height; pdf.image(logo, MG, MG, lw, lh);
     pdf.text(PW - MG, MG + 12, 'Assembly Instructions', 13, true, 'right'); pdf.text(PW - MG, MG + 30, 'MODEL NO.: ' + modelNo, 15, true, 'right');
     pdf.line(MG, MG + 44, PW - MG, MG + 44, 1.4); pdf.text(PW / 2, MG + 64, ((M.friendly || '').trim() || title), 18, true, 'center'); pdf.text(PW - MG, MG + 64, dstr, 8, false, 'right');
-    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.46', 7, false, 'right', 0.4); return MG + 76; };
+    pdf.text(MG, PH - MG + 8, 'SHEET ' + pg + ' OF ' + totalPages, 7, false, 'left', 0.4); pdf.text(PW - MG, PH - MG + 8, 'CASEMAKER 2 2026-09-03.64', 7, false, 'right', 0.4); return MG + 76; };
   let y = header(1);
   const cw = CW / hw.length, rowH = 78; pdf.rect(MG, y, CW, rowH, { lw: 0.9 });
   hw.forEach((r, i) => { const x = MG + i * cw; if (i) pdf.line(x, y, x, y + rowH, 0.9); pdf.rect(x, y, cw, 14, { fill: 0.9 }); pdf.text(x + cw / 2, y + 10, r.code, 8, true, 'center');
@@ -3598,6 +3716,18 @@ async function buildInstructions() {
   py += 28; pdf.rect(MG, py, leftW - 10, 74, { lw: 0.9 }); pdf.text(MG + 8, py + 15, 'IMPORTANT: FUNCTION OF CAM NUT', 9.5, true); pdf.line(MG + 8, py + 16, MG + leftW - 18, py + 16, 0.6);
   pdf.circle(MG + 26, py + 36, 9); pdf.circle(MG + 26, py + 36, 3); pdf.line(MG + 23.5, py + 36, MG + 28.5, py + 36, 0.8); pdf.poly([[MG + 36, py + 36], [MG + 33, py + 30], [MG + 39, py + 30]], { fill: 0 });
   pdf.text(MG + 44, py + 30, '1/4 TURN CLOCKWISE TO LOCK.', 7.5, true); pdf.text(MG + 44, py + 40, 'Arrow on the cam nut points toward the pin hole', 7); pdf.text(MG + 44, py + 49, 'before the cam nut is pushed into the panel.', 7); pdf.text(MG + 8, py + 66, 'ASSEMBLE ENTIRE CASE BEFORE LOCKING CAM NUTS FULLY.', 7.6, true);
+  { const notes = ['Assemble on a carpet or blanket. Check all parts and hardware before starting.',
+      'A part with cam nuts and drilled edges fits ONE way - the drilled edge onto the pins. Never force it: turn it around.',
+      'Do not fully tighten the cam nuts until the unit is completely assembled and square.'];
+    if ((EXP.assy || {}).tools !== false) notes.push('Tools: a #2 Phillips or flat screwdriver for the cam nuts, a soft mallet for the dowels.');
+    if ((EXP.assy || {}).notes) notes.push(EXP.assy.notes);
+    let nyy = py + 88; pdf.text(MG, nyy, 'IMPORTANT NOTE:', 8.5, true); nyy += 4;
+    const maxW = leftW - 14;
+    notes.forEach(t => { const words = ('- ' + t).split(' '); let ln = '';
+      words.forEach(w2 => { const t2 = ln ? ln + ' ' + w2 : w2;
+        if (pdf.width(t2, 7.2) > maxW) { nyy += 9; if (nyy < PH - MG - 4) pdf.text(MG, nyy, ln, 7.2); ln = w2; }
+        else ln = t2; });
+      if (ln) { nyy += 9; if (nyy < PH - MG - 4) pdf.text(MG, nyy, ln, 7.2); } }); }
   { const cv = whiteCanvas(isoCanvas(numbered.flatMap(boxesOf).map(b => ({ ...b, label: undefined })), { w: 300, h: 300, dark: false, ss: 3, holes: numbered.flatMap(it => isoHoles([it.p])) })); const iw = CW - leftW, ih = Math.min(iw * 1.35, PH - MG - y - 46); pdf.text(MG + leftW + iw / 2, y + 14, 'COMPLETED ASSEMBLY', 11, true, 'center'); pdf.image(cv, MG + leftW, y + 22, iw, ih); }
   const cellW = CW / 2, cellH = (PH - MG - 60 - (MG + 76)) / 2;
   plan.forEach((st, i) => { const k = i % stepsPerPage; if (k === 0) { header(2 + Math.floor(i / stepsPerPage)); const rows = Math.min(2, Math.ceil((plan.length - i) / 2)); pdf.line(MG, MG + 76, PW - MG, MG + 76, 0.9); pdf.line(PW / 2, MG + 76, PW / 2, MG + 76 + rows * cellH, 0.9); for (let rr = 1; rr <= rows; rr++) pdf.line(MG, MG + 76 + rr * cellH, PW - MG, MG + 76 + rr * cellH, 0.9); }
@@ -3616,56 +3746,106 @@ async function buildInstructions() {
           for (let a = 0; a < 3; a++) acc[a] -= m2[a] * (j.pins + j.dow); });   // hover = opposite the motion
         const L2 = Math.hypot(...acc); return L2 > 0.01 ? acc.map(v => v / L2) : null; };
       const prev = st.all.filter(it => !st.items.includes(it)).flatMap(boxesOf).map(bb => ({ ...tx(bb), label: undefined }));
-      const txP2 = (q, d2) => tx({ min: q.map((v2, i3) => v2 + d2[i3]), max: q }).min;
+      const txP2 = (q, d2) => { const qd = q.map((v2, i3) => v2 + d2[i3]); return tx({ min: qd, max: qd }).min; };
       const txVec = v2 => { const o2 = tx({ min: [0, 0, 0], max: [0, 0, 0] }).min, q2 = tx({ min: v2, max: v2 }).min;
         return [q2[0] - o2[0], q2[1] - o2[1], q2[2] - o2[2]]; };
-      const holeMap = (P2, d2, mv) => isoHoles([P2], { edges: !!mv }).map(hl => hl.poly ?
-        { poly: hl.poly.map(q => txP2(q, d2)) } :
-        { ...hl, c: txP2(hl.c, d2), e1: txVec(hl.e1), e2: txVec(hl.e2) });
+      const VW = (() => { const yw = -20 * Math.PI / 180, elv = 24 * Math.PI / 180;
+        return [-Math.sin(yw) * Math.cos(elv), -Math.cos(yw) * Math.cos(elv), Math.sin(elv)]; })();
+      const vwWorld = (() => {                                                  // pull the figure camera back through the flat remap
+        const o2 = tx({ min: [0, 0, 0], max: [0, 0, 0] }).min;
+        const cols = [0, 1, 2].map(a2 => { const e2 = [0, 0, 0]; e2[a2] = 1;
+          const q2 = tx({ min: e2, max: e2 }).min; return [q2[0] - o2[0], q2[1] - o2[1], q2[2] - o2[2]]; });
+        /* remap is a signed permutation: transpose = inverse */
+        return [0, 1, 2].map(a2 => cols[a2][0] * VW[0] + cols[a2][1] * VW[1] + cols[a2][2] * VW[2]); })();
+      const holeMap = (P2, d2, mv) => isoHoles([P2], { edges: !!mv, view: mv ? vwWorld : null }).map(hl => hl.poly ?
+        { poly: hl.poly.map(q => txP2(q, d2)), __pn: P2.name, __d: d2 } :
+        { ...hl, c: txP2(hl.c, d2), e1: txVec(hl.e1), e2: txVec(hl.e2), __pn: P2.name, __w: hl.c, __d: d2 });
       const figHoles = [];
       st.all.filter(it => !st.items.includes(it)).forEach(it => figHoles.push(...holeMap(it.p, [0, 0, 0], false)));
-      const curB = st.items.flatMap(it => { const ax = hoverOf(it) || [0, 0, 1];
+      const curB = st.items.flatMap(it => { const ax = st.doorStep ? [0, -1, 0] : (hoverOf(it) || [0, 0, 1]);
         const d = txV(ax.map(v => v * lift));
         const d0 = i === 0 ? [0, 0, 0] : d;
         figHoles.push(...holeMap(it.p, d0, true));
         return boxesOf(it).map((bb, bi2) => ({ ...tx(bb), hi: true, dx: d0, seatArrow: i !== 0 && bi2 === 0 })); });
       /* the actual bolts, dowels and cam nuts, standing where they stand */
       const figMeshes = [];
+      const moverD = {}; st.items.forEach(it => { const ax2 = st.doorStep ? [0, -1, 0] : (hoverOf(it) || [0, 0, 1]); moverD[it.p.name] = i === 0 ? [0, 0, 0] : ax2.map(v => v * lift); });
+      if (st.doorStep) {                                                      // the modelled hinges and pulls ride on the hovering doors
+        const synth = synthHardware(all);
+        st.items.forEach(it => { const P4 = it.p; if (!P4.box) return;
+          const d3 = moverD[P4.name] || [0, 0, 0];
+          synth.forEach(hw2 => { if (!hw2.mesh || !(hw2.name.startsWith('HINGE') || hw2.name.startsWith('PULL'))) return;
+            const o6 = hw2.mesh.o;
+            const inside = o6[0] > P4.box.min[0] - 0.6 && o6[0] < P4.box.max[0] + 0.6 &&
+                           o6[1] > P4.box.min[1] - 1.6 && o6[1] < P4.box.max[1] + 1.6 &&
+                           o6[2] > P4.box.min[2] - 0.6 && o6[2] < P4.box.max[2] + 0.6;
+            if (!inside) return;
+            figMeshes.push({ v: hw2.mesh.v, f: hw2.mesh.f,
+              m: hw2.mesh.m.map(col => txVec(col)),
+              o: txP2(o6, d3), __pn: P4.name }); }); }); }
       if (st.glide) { const gM = hwPartMesh('D');
-        st.all.forEach(it => (it.p.holes || []).filter(h2 => h2.type === 'GLIDE').forEach(h2 => {
-          const w3 = it.p.frame ? faceHoleWorld(it.p, h2) : null; if (!w3) return;
-          const fb3 = it.p.frame, o5 = Math.sign((h2.under ? fb3.opp : fb3.shown) - (h2.under ? fb3.shown : fb3.opp)) || 1;
-          const gd = [0, 0, 0]; gd[fb3.ax] = o5;
-          const gu1 = Math.abs(gd[0]) > 0.5 ? [0, 1, 0] : [1, 0, 0];
-          const gu2 = [gd[1] * gu1[2] - gd[2] * gu1[1], gd[2] * gu1[0] - gd[0] * gu1[2], gd[0] * gu1[1] - gd[1] * gu1[0]];
-          figMeshes.push({ v: gM.v, f: gM.f, m: [txVec(gu1), txVec(gu2), txVec(gd)], o: txP2(w3, [0, 0, 0]) }); })); }
-      { const HS2 = 1.35, placedNames = new Set(st.all.filter(it => !st.items.includes(it)).map(it => it.p.name));
-        const moverD = {}; st.items.forEach(it => { const ax2 = hoverOf(it) || [0, 0, 1]; moverD[it.p.name] = i === 0 ? [0, 0, 0] : ax2.map(v => v * lift); });
+        st.all.forEach(it => { const p3 = it.p; if (!p3.frame) return; const f3 = p3.frame;
+          (p3.holes || []).filter(h2 => h2.type === 'GLIDE').forEach(h2 => {
+            let w3, en3;
+            if (h2.edge) { w3 = edgeHoleWorld(p3, h2);
+              if (h2.x <= 0.02) en3 = f3.ux.map(v => -v); else if (h2.x >= p3.w - 0.02) en3 = f3.ux;
+              else if (h2.y <= 0.02) en3 = f3.uy.map(v => -v); else en3 = f3.uy; }
+            else { w3 = faceHoleWorld(p3, h2);
+              const o5 = Math.sign((h2.under ? f3.opp : f3.shown) - (h2.under ? f3.shown : f3.opp)) || 1;
+              en3 = [0, 0, 0]; en3[f3.ax] = o5; }
+            const gd = en3.map(v => -v);                                        // stud runs INTO the bore
+            const gu1 = Math.abs(gd[0]) > 0.5 ? [0, 1, 0] : [1, 0, 0];
+            const gu2 = [gd[1] * gu1[2] - gd[2] * gu1[1], gd[2] * gu1[0] - gd[0] * gu1[2], gd[0] * gu1[1] - gd[1] * gu1[0]];
+            /* the mesh's stud is at its top: flip it in so the base sits proud on the edge */
+            let gmax = 0; for (let i3 = 2; i3 < gM.v.length; i3 += 3) gmax = Math.max(gmax, gM.v[i3]);
+            figMeshes.push({ v: gM.v.map((v, i3) => i3 % 3 === 2 ? gmax - v - 0.35 : v), f: gM.f,
+              m: [txVec(gu1), txVec(gu2).map(v => -v), txVec(gd).map(v => -v)], o: txP2(w3, [0, 0, 0]),
+              __pn: p3.name, __w: w3, __d: [0, 0, 0] }); }); }); }
+      { const inFig = new Set(st.all.map(it => it.p.name));                   // hardware persists: what was installed stays installed
         const frameFor = ax3 => { const u1 = Math.abs(ax3[0]) > 0.5 ? [0, 1, 0] : [1, 0, 0];
           const u2 = [ax3[1] * u1[2] - ax3[2] * u1[1], ax3[2] * u1[0] - ax3[0] * u1[2], ax3[0] * u1[1] - ax3[1] * u1[0]];
           return [txVec(u1), txVec(u2), txVec(ax3)]; };
         const boltM = hwPartMesh('A'), dowM = hwPartMesh('C'), nutM = minifixMesh();
         let bmax = 0; for (let i2 = 2; i2 < boltM.v.length; i2 += 3) bmax = Math.max(bmax, boltM.v[i2]);
-        const boltP = { v: boltM.v.map((v, i2) => i2 % 3 === 2 ? (v - (bmax - 0.95)) * 1 : v * HS2), f: boltM.f };
-        const dowP2 = { v: dowM.v.map((v, i2) => i2 % 3 === 2 ? v - 0.55 : v * HS2), f: dowM.f };
-        (st.js || []).slice(0, 30).forEach(j2 => { if (!j2.pairs) return;
+        const boltP = { v: boltM.v.map((v, i2) => i2 % 3 === 2 ? v - (bmax - 0.95) : v), f: boltM.f };
+        const dowP2 = { v: dowM.v.map((v, i2) => i2 % 3 === 2 ? v - 0.55 : v), f: dowM.f };
+        (plan0.graph || []).filter(j2 => j2.pairs && inFig.has(j2.r.name)).slice(0, 40).forEach(j2 => {
           const fr3 = frameFor(j2.axis || [0, 0, 1]);
+          const dR = moverD[j2.r.name] || [0, 0, 0];                          // pins ride with a hovering receiver (sides, top)
           j2.pairs.slice(0, 8).forEach(pr2 => {
             const src2 = pr2.type === 'PIN' ? boltP : dowP2;
-            figMeshes.push({ v: src2.v, f: src2.f, m: fr3, o: txP2(pr2.c, [0, 0, 0]) }); });
-          const mover = placedNames.has(j2.b.name) ? j2.r : j2.b;
-          const d3 = moverD[mover.name] || [0, 0, 0];
-          if (mover === j2.b) (mover.holes || []).filter(h2 => h2.type === 'CAM').slice(0, 10).forEach(h2 => {
-            const wpt = faceHoleWorld(mover, h2);
-            const fb2 = mover.frame, o4 = Math.sign((h2.under ? fb2.opp : fb2.shown) - (h2.under ? fb2.shown : fb2.opp)) || 1;
+            figMeshes.push({ v: src2.v, f: src2.f, m: fr3, o: txP2(pr2.c, dR), __pn: j2.r.name, __w: pr2.c, __d: dR, __kind: 'pin' }); }); });
+        st.all.forEach(it => { const P4 = it.p; if (!P4.frame) return;
+          const d3 = moverD[P4.name] || [0, 0, 0];
+          (P4.holes || []).filter(h2 => h2.type === 'CAM').slice(0, 14).forEach(h2 => {
+            const wpt = faceHoleWorld(P4, h2);
+            const fb2 = P4.frame, o4 = Math.sign((h2.under ? fb2.opp : fb2.shown) - (h2.under ? fb2.shown : fb2.opp)) || 1;
             const cd2 = [0, 0, 0]; cd2[fb2.ax] = o4;
             const cu1 = Math.abs(cd2[0]) > 0.5 ? [0, 1, 0] : [1, 0, 0];
             const cu2 = [cd2[1] * cu1[2] - cd2[2] * cu1[1], cd2[2] * cu1[0] - cd2[0] * cu1[2], cd2[0] * cu1[1] - cd2[1] * cu1[0]];
-            figMeshes.push({ v: nutM.v.map(v => v * HS2), f: nutM.f,
+            figMeshes.push({ v: nutM.v, f: nutM.f,
               m: [txVec(cu1), txVec(cu2).map(v => -v), txVec(cd2).map(v => -v)],
-              o: txP2(wpt.map((v, i3) => v + cd2[i3] * 0.02), d3) }); }); }); }
+              o: txP2(wpt.map((v, i3) => v + cd2[i3] * 0.02), d3), __pn: P4.name, __w: wpt.map((v, i3) => v + cd2[i3] * 0.02), __d: d3, __kind: 'nut' }); }); }); }
+      { const boxesRec = {};
+        st.all.forEach(it => { const d4 = st.items.includes(it) ? (st.doorStep ? txVec([0, -1, 0]).map(v => v * lift) : (() => { const a4 = hoverOf(it) || [0, 0, 1]; return i === 0 ? [0, 0, 0] : txVec(a4.map(v => v * lift)); })()) : [0, 0, 0];
+          const bb2 = tx(it.p.box || { min: [0, 0, 0], max: [0, 0, 0] });
+          boxesRec[it.p.name] = { min: bb2.min.map((v, i4) => v + Math.min(0, d4[i4]) ), max: bb2.max.map((v, i4) => v + Math.max(0, d4[i4])) }; });
+        const inFig2 = new Set(st.all.map(it => it.p.name));
+        const expPins = st.isFlip || st.glide ? null : (plan0.graph || []).filter(j2 => j2.pairs && inFig2.has(j2.r.name)).slice(0, 40).reduce((a4, j2) => a4 + Math.min(8, j2.pairs.length), 0);
+        const expNuts = st.isFlip || st.glide ? null : st.all.reduce((a4, it) => a4 + Math.min(14, (it.p.holes || []).filter(h2 => h2.type === 'CAM').length), 0);
+        AUDIT.push({ i: i + 1, txPoint: q => txP2(q, [0, 0, 0]),
+          decals: figHoles, meshes: figMeshes, boxes: boxesRec,
+          pinCount: figMeshes.filter(m2 => m2.__kind === 'pin').length,
+          nutCount: figMeshes.filter(m2 => m2.__kind === 'nut').length,
+          expectPins: expPins, expectNuts: expNuts,
+          movers: st.items.map(it => { const ax4 = st.doorStep ? [0, -1, 0] : (hoverOf(it) || null);
+            return { name: it.p.name, dx: i === 0 ? [0, 0, 0] : (ax4 ? txVec(ax4.map(v => v * lift)) : [0, 0, 0]),
+                     want: (i === 0 || !ax4) ? null : (() => { const w4 = txVec(ax4); const L4 = Math.hypot(...w4) || 1; return w4.map(v => v / L4); })() }; }) }); }
       const cv = whiteCanvas(isoCanvas([...prev, ...curB], { w: Math.round(figW), h: Math.round(figH), dark: false, ss: 3, holes: figHoles, meshes: figMeshes })); pdf.image(cv, cx + 12, cy + 26, figW, figH);
       /* the breakout: this step's first joint, rendered from its true drilled cluster */
+      if (st.doorStep && st.items.length) { const it0 = st.items.find(it => it.p.name.startsWith('DOOR')) || st.items[0];
+        const bx0 = cx + cellW - 46, by0 = cy + 22 + figH / 2;
+        doorBreakout(pdf, bx0, by0, 34, it0.p, moverD[it0.p.name] || [0, -2, 0], all, tx); }
       if (st.js.length) { const j = st.js.find(q => q.pairs.length) || st.js[0];
         if (j && j.pairs && j.pairs.length) {
           const bx0 = cx + cellW - 46, by0 = cy + 22 + figH / 2;
@@ -3676,14 +3856,8 @@ async function buildInstructions() {
     const words = st.text.split(' '); const lines = []; let ln = ''; words.forEach(w => { const t = ln ? ln + ' ' + w : w; if (pdf.width(t, 7.5) > cellW - 24) { lines.push(ln); ln = w; } else ln = t; }); lines.push(ln);
     let ty = cy + figH + 34; lines.slice(0, 5).forEach(l => { pdf.text(cx + 12, ty, l, 7.5); ty += 9; });
     });
-  const lastRows = Math.min(3, Math.ceil(((plan.length - 1) % stepsPerPage + 1) / 2)); const ny = Math.min(PH - MG - 56, MG + 76 + lastRows * cellH + 8); pdf.text(MG, ny + 14, 'IMPORTANT NOTE:', 10, true);
-  pdf.line(MG, ny, PW - MG, ny, 0.9);
-  const notes = ['Assemble on a carpet or blanket to avoid scratching the panels. Check all parts and hardware are present before starting.',
-   'A part with cam nuts and drilled edges fits ONE way - the drilled edge onto the pins. If it will not seat flush, do not force it: turn it around.',
-   'Do not fully tighten the cam nuts until the unit is completely assembled and square.'];
-  if ((EXP.assy || {}).tools !== false) notes.push('Tools: a #2 Phillips or flat screwdriver for the cam nuts, a soft mallet for the dowels. No other tools are needed.');
-  if ((EXP.assy || {}).notes) notes.push(EXP.assy.notes);
-  notes.forEach((t, i) => pdf.text(MG, ny + 28 + i * 11, '- ' + t, 8));
+  { const bad = asmAudit(AUDIT, plan0);
+    if (bad.length) { alert('ASSEMBLY AUDIT FAILED - NOT EXPORTED:\n' + bad.slice(0, 8).join('\n')); return; } }
   download('ASSEMBLY_' + modelNo.replace(/\s+/g, '_') + '_' + dstr + '.pdf', pdf.build(), 'application/pdf');
 }
 
@@ -3727,7 +3901,7 @@ function ncFor(p) {
   const J = M.opt.joinery || JOINERY, maxB = EXP.drill.maxBore;
   const r = cnc1Program(P), code = Array.isArray(r.code) ? r.code.join('\n') : String(r.code || '');
   const head = [];
-  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.46 - ' + p.name + ' x' + p.qty);
+  head.push(';EXPORTED FROM CASEMAKER 2 2026-09-03.64 - ' + p.name + ' x' + p.qty);
   head.push(';STOCK ' + p.t + '" - HOLE CENTERLINE ' + r3(P._ctr) + '" FROM THE CAM FACE');
   head.push(';PANEL LIES CAM FACE ' + (P._faceDown ? 'DOWN' : 'UP') + ': Z DEPTH OVERRIDE ' + P.zOverride + '" OFF THE TABLE');
   head.push(';LOAD TURNED 90 LEFT FROM THE DRAWING: ' + r3(p.w) + '" LONG SIDE RUNS DOWN Y (VACUUM ZONE), ' + r3(p.h) + '" ACROSS X');
@@ -4187,6 +4361,133 @@ function synthHardware(ps) {                                                   /
     }); });
   return out;
 }
+
+/* ---------- the export audit: SketchUp gets the same guarantees as the paper ----------
+   E1 validity: the XML parses, every instanced geometry resolves, every index is in range.
+   E2 panel truth: every panel node's world envelope equals its part's box - size AND position -
+      under one coherent global convention (identity, or the deliberate mirror, never a mix).
+   E3 hardware truth: every hardware node sits on its drilled position from the same synth data
+      the viewport uses.
+   E4 bores are cut: sampled cam bores must be true voids in the mesh, not painted decals.
+   E5 counts: nothing dropped, nothing duplicated - panels and hardware alike. */
+function daeAudit(xml, psAll, S) {
+  const bad = [];
+  let doc;
+  try { doc = new DOMParser().parseFromString(xml, 'application/xml');
+    if (doc.querySelector('parsererror')) { bad.push('XML does not parse (E1)'); return bad; }
+  } catch (e) { return ['XML does not parse: ' + e.message + ' (E1)']; }
+  const NS = 'http://www.collada.org/2005/11/COLLADASchema';
+  const geoPos = {};
+  doc.querySelectorAll('geometry').forEach(g => {
+    const fa = g.querySelector('float_array'); if (!fa) return;
+    const v = fa.textContent.trim().split(/\s+/).map(Number);
+    if (v.length % 3) bad.push('geometry ' + g.getAttribute('id') + ' float count not /3 (E1)');
+    const pr = g.querySelector('p');
+    if (pr) { const idx = pr.textContent.trim().split(/\s+/).map(Number);
+      const mx = Math.max(...idx); if (mx * 3 >= v.length) bad.push('geometry ' + g.getAttribute('id') + ' index out of range (E1)'); }
+    geoPos[g.getAttribute('id')] = v; });
+  const libNode = {};
+  doc.querySelectorAll('library_nodes > node, library_nodes node[id]').forEach(n => libNode[n.getAttribute('id')] = n);
+  const mul = (A, B) => { const R = new Array(16).fill(0);
+    for (let r2 = 0; r2 < 4; r2++) for (let c2 = 0; c2 < 4; c2++) for (let k2 = 0; k2 < 4; k2++) R[r2 * 4 + c2] += A[r2 * 4 + k2] * B[k2 * 4 + c2];
+    return R; };
+  const IDN = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+  const xf = n => { let Mx = IDN;
+    n.querySelectorAll(':scope > matrix').forEach(m => Mx = mul(Mx, m.textContent.trim().split(/\s+/).map(Number)));
+    n.querySelectorAll(':scope > translate').forEach(t => { const v = t.textContent.trim().split(/\s+/).map(Number);
+      Mx = mul(Mx, [1,0,0,v[0], 0,1,0,v[1], 0,0,1,v[2], 0,0,0,1]); });
+    return Mx; };
+  const ap = (Mx, p2) => [Mx[0]*p2[0]+Mx[1]*p2[1]+Mx[2]*p2[2]+Mx[3], Mx[4]*p2[0]+Mx[5]*p2[1]+Mx[6]*p2[2]+Mx[7], Mx[8]*p2[0]+Mx[9]*p2[1]+Mx[10]*p2[2]+Mx[11]];
+  const found = [];                                                             // {name, bbox}
+  const walk = (n, Mx) => { const M2 = mul(Mx, xf(n));
+    n.querySelectorAll(':scope > instance_geometry').forEach(ig => {
+      const id2 = (ig.getAttribute('url') || '').slice(1); const v = geoPos[id2];
+      if (!v) { bad.push('node ' + n.getAttribute('name') + ' instances missing geometry (E1)'); return; }
+      let mn = [1e18, 1e18, 1e18], mx2 = [-1e18, -1e18, -1e18];
+      for (let i2 = 0; i2 < v.length; i2 += 3) { const w2 = ap(M2, [v[i2], v[i2+1], v[i2+2]]);
+        for (let a2 = 0; a2 < 3; a2++) { mn[a2] = Math.min(mn[a2], w2[a2]); mx2[a2] = Math.max(mx2[a2], w2[a2]); } }
+      found.push({ name: n.getAttribute('name') || '?', min: mn, max: mx2, geo: id2, M: M2 }); });
+    n.querySelectorAll(':scope > instance_node').forEach(inn => {
+      const t2 = libNode[(inn.getAttribute('url') || '').slice(1)];
+      if (t2) walk(t2, M2); else bad.push('node instances a missing lib node (E1)'); });
+    n.querySelectorAll(':scope > node').forEach(c2 => walk(c2, M2)); };
+  doc.querySelectorAll('visual_scene > node').forEach(n => walk(n, IDN));
+  /* E2: one coherent global convention, fitted on the sides */
+  const panels = psAll.filter(p => !p.hardware && p.box && p.box.min);
+  const fits = (mirror) => { let errs2 = 0;
+    panels.forEach(p => { const insts = found.filter(f => f.name === p.name);
+      const want = { min: p.box.min.slice(), max: p.box.max.slice() };
+      if (mirror) { const W2 = Math.max(...panels.map(q => q.box.max[0]));
+        const a2 = W2 - want.max[0], b2 = W2 - want.min[0]; want.min[0] = a2; want.max[0] = b2; }
+      const hit = insts.some(f => [0, 1, 2].every(a2 =>
+        Math.abs(f.min[a2] - want.min[a2] * S) < 3e-3 * Math.max(1, S) && Math.abs(f.max[a2] - want.max[a2] * S) < 3e-3 * Math.max(1, S)));
+      if (!hit) errs2++; });
+    return errs2; };
+  const e0 = fits(false), e1 = fits(true);
+  const conv = e0 <= e1 ? false : true;
+  const misses = Math.min(e0, e1);
+  if (misses) bad.push(misses + ' panel node(s) off their true box under either convention (E2)');
+  /* E5 counts, grouped by name */
+  { const wantN = {}, haveN = {};
+    panels.forEach(p => wantN[p.name] = (wantN[p.name] || 0) + p.qty);
+    found.forEach(f => { if (wantN[f.name] !== undefined) haveN[f.name] = (haveN[f.name] || 0) + 1; });
+    Object.keys(wantN).forEach(nm => { if ((haveN[nm] || 0) !== wantN[nm])
+      bad.push(nm + ': ' + (haveN[nm] || 0) + ' nodes vs qty ' + wantN[nm] + ' (E5)'); }); }
+  /* E3 hardware placement (when hardware was exported) */
+  const hwList = psAll.filter(p => p.hardware && (p.mesh || p.box || p.boxes));
+  if (hwList.length && found.some(f => !panels.some(p => p.name === f.name))) {
+    const used2 = new Set();
+    let off = 0, missing = 0;
+    hwList.forEach(hw2 => { const ctr = hw2.mesh ? hw2.mesh.o :
+        (hw2.box ? hw2.box.min.map((v, i2) => (v + hw2.box.max[i2]) / 2) : hw2.boxes[0].min.map((v, i2) => (v + hw2.boxes[0].max[i2]) / 2));
+      const wantC = conv ? [Math.max(...panels.map(q => q.box.max[0])) - ctr[0], ctr[1], ctr[2]] : ctr;
+      let best = -1, bd2 = 1e18;
+      found.forEach((f, fi2) => { if (used2.has(fi2) || panels.some(p => p.name === f.name)) return;
+        const c3 = f.min.map((v, i2) => (v + f.max[i2]) / 2);
+        const d2 = Math.hypot(c3[0] - wantC[0] * S, c3[1] - wantC[1] * S, c3[2] - wantC[2] * S);
+        if (d2 < bd2) { bd2 = d2; best = fi2; } });
+      if (best < 0) missing++;
+      else { used2.add(best); if (bd2 > 2.4 * Math.max(1, S)) off++; } });
+    if (missing) bad.push(missing + ' hardware node(s) missing (E5)');
+    if (off) bad.push(off + ' hardware node(s) far from their drilled position (E3)');
+  }
+  /* E4: sampled cam bores must be voids */
+  let checked = 0;
+  for (const p of panels) { if (checked >= 6) break;
+    const cams = (p.holes || []).filter(h => h.type === 'CAM').slice(0, 2);
+    if (!cams.length) continue;
+    const inst = found.find(f => f.name === p.name); if (!inst) continue;
+    const v = geoPos[inst.geo]; const idxEl = new DOMParser().parseFromString(xml, 'application/xml');
+    const g = idxEl.querySelector('geometry[id="' + inst.geo + '"] p'); if (!g) continue;
+    const tris = g.textContent.trim().split(/\s+/).map(Number);
+    const f2 = p.frame;
+    for (const h of cams) { if (checked >= 6) break; checked++;
+      const C0 = toWorld(p, h.x, h.y, h.under ? 'opp' : 'shown');
+      const want = conv ? [Math.max(...panels.map(q => q.box.max[0])) - C0[0], C0[1], C0[2]] : C0;
+      const wc = want.map(vv => vv * S);
+      const ax2 = f2.ax; const A1 = (ax2 + 1) % 3, A2 = (ax2 + 2) % 3;
+      /* the void test: the bore ring must be present, its interior empty, and no
+         non-degenerate triangle may span it - immune to the face earcut's bridge slivers */
+      let ring2 = 0, minIn = 1e9; const ringIdx = new Set();
+      const WP = [];
+      for (let i2 = 0; i2 < v.length; i2 += 3) WP.push(ap(inst.M, [v[i2], v[i2+1], v[i2+2]]));
+      WP.forEach((w2, wi) => { if (Math.abs(w2[ax2] - wc[ax2]) > 8e-3 * Math.max(1, S)) return;
+        const d2 = Math.hypot(w2[A1] - wc[A1], w2[A2] - wc[A2]);
+        if (Math.abs(d2 - h.d / 2 * S) < 0.06 * Math.max(1, S)) { ring2++; ringIdx.add(wi); }
+        else if (d2 < h.d / 2 * S - 0.04 * Math.max(1, S)) minIn = Math.min(minIn, d2); });
+      let capped = false;
+      for (let i2 = 0; i2 + 2 < tris.length && !capped; i2 += 3) {
+        if (!(ringIdx.has(tris[i2]) && ringIdx.has(tris[i2+1]) && ringIdx.has(tris[i2+2]))) continue;
+        const P0 = WP[tris[i2]], P1 = WP[tris[i2+1]], P2 = WP[tris[i2+2]];
+        const cr2 = (o2, a2, b2) => (a2[A1] - o2[A1]) * (b2[A2] - o2[A2]) - (a2[A2] - o2[A2]) * (b2[A1] - o2[A1]);
+        if (Math.abs(cr2(P0, P1, P2)) < 1e-3) continue;
+        const d0 = cr2(P0, P1, wc), d1 = cr2(P1, P2, wc), d2 = cr2(P2, P0, wc);
+        if ((d0 >= 0 && d1 >= 0 && d2 >= 0) || (d0 <= 0 && d1 <= 0 && d2 <= 0)) capped = true; }
+      if (ring2 < 8) bad.push(p.name + ': a cam bore ring is missing from the mesh (E4)');
+      else if (minIn < 1e8 || capped) bad.push(p.name + ': a cam bore is painted over, not cut (E4)'); } }
+  return bad;
+}
+
 function daeText(ps, k, units, o3) { o3 = o3 || {};
   if (o3.hw === false) ps = ps.filter(p => !p.hardware && p.role !== 'slide');
   else if (o3.hw) ps = ps.concat(synthHardware(ps));
@@ -4330,8 +4631,8 @@ $('newBtn').onclick = () => { M = newCase(); HIST.past = []; HIST.future = []; H
 $('job').onchange = () => { M.job = $('job').value; };
 $('friendly').onchange = () => { M.friendly = $('friendly').value; };
 $('saveBtn').onclick = () => {
-  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.46', saved: new Date().toISOString(), model: M };
-  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.46'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
+  const doc = { format: 'CASEMAKER2', version: 1, build: '2026-09-03.64', saved: new Date().toISOString(), model: M };
+  download((M.job || 'CASE').replace(/\s+/g, '_') + '_' + '2026-09-03.64'.slice(0, 10) + '.casemaker2', JSON.stringify(doc), 'application/json'); };
 $('loadBtn').onclick = () => $('loadFile').click();
 $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
   f.text().then(t => { try { const d = JSON.parse(t); if (d.format !== 'CASEMAKER2') throw new Error('not a CASEMAKER 2 file');
@@ -4342,7 +4643,7 @@ $('loadFile').onchange = e => { const f = e.target.files[0]; if (!f) return;
    Served over http: the page re-reads itself every minute and compares build stamps.
    Opened from a file: the browser blocks reading files, so tabs tell each other instead -
    opening a newer build in any tab tells every older tab on this machine. */
-const BUILD = '2026-09-03.46';
+const BUILD = '2026-09-03.64';
 const newer = (a, b) => { if (!a || !b) return false; const [da, na] = a.split('.'), [db, nb] = b.split('.');
   return da > db || (da === db && (+na || 0) > (+nb || 0)); };
 function showUpdate(build) { $('updateT').textContent = 'A NEW BUILD OF CASEMAKER IS AVAILABLE · ' + build + ' (YOU ARE ON ' + BUILD + ')'; $('update').classList.add('show'); }
